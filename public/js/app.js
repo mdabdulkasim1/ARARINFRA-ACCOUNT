@@ -13,6 +13,7 @@
     'pdc': { title: 'Cheque register', perm: 'payment.view', render: (h) => window.Payables.renderPdc(h) },
     'petty': { title: 'Petty cash', perm: 'petty.view', render: (h, q) => window.Petty.render(h, q) },
     'monthly': { title: 'What has to be paid', perm: 'report.view', render: (h, q) => window.Monthly.renderMonthly(h, q) },
+    'emi': { title: 'Bank EMI', perm: 'facility.view', render: (h, q) => window.Monthly.renderEmi(h, q) },
     'facilities': { title: 'Bank facilities', perm: 'facility.view', render: (h, q) => window.Monthly.renderFacilities(h, q) },
     'income': { title: 'Income', perm: 'sales.view', render: (h, q) => window.Income.render(h, q) },
     'ageing': { title: 'Supplier ageing', perm: 'report.view', render: (h) => window.Reports.renderAgeing(h) },
@@ -35,6 +36,7 @@
       { href: '#/payments', icon: '&#128181;', label: 'Payments', key: 'payments', perm: 'payment.view' },
       { href: '#/pdc', icon: '&#128179;', label: 'Cheque register', key: 'pdc', perm: 'payment.view' },
       { href: '#/petty', icon: '&#128176;', label: 'Petty cash', key: 'petty', perm: 'petty.view', badge: 'petty' },
+      { href: '#/emi', icon: '&#127974;', label: 'Bank EMI', key: 'emi', perm: 'facility.view' },
       { href: '#/facilities', icon: '&#128663;', label: 'Loans & LC', key: 'facilities', perm: 'facility.view' }
     ] },
     { group: 'Money in', items: [

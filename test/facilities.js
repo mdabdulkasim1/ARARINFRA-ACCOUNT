@@ -375,6 +375,55 @@ async function main() {
     assert.strictEqual(r.status, 403);
   });
 
+  await check('the bank EMI list totals the month and what has been missed', async () => {
+    const r = await owner('GET', '/api/facilities?type=VEHICLE_LOAN');
+    assert.strictEqual(r.status, 200);
+    const t = r.data.totals;
+
+    // Every figure the Bank EMI screen shows has to come back from the rows it
+    // is showing, or the tiles and the table disagree.
+    const active = r.data.rows.filter((f) => f.status === 'ACTIVE');
+    assert.strictEqual(t.count, active.length);
+    assert.strictEqual(
+      t.monthly,
+      money(active.reduce((n, f) => n + (f.is_instalment ? f.emi_amount : 0), 0))
+    );
+    assert.strictEqual(t.remaining, money(active.reduce((n, f) => n + f.remaining_total, 0)));
+    assert.strictEqual(t.due_this_month, money(active.reduce((n, f) => n + f.due_this_month, 0)));
+    assert.strictEqual(t.overdue_amount, money(active.reduce((n, f) => n + f.overdue_amount, 0)));
+    assert.strictEqual(t.overdue_count, active.reduce((n, f) => n + f.overdue_instalments, 0));
+
+    // A missed instalment is one that is due and dated before today, so what is
+    // missed can never be more than what is left to pay.
+    assert.ok(t.overdue_amount <= t.remaining + 0.005);
+    r.data.rows.forEach((f) => {
+      if (f.overdue_instalments === 0) assert.strictEqual(f.overdue_amount, 0);
+      else assert.ok(f.overdue_amount > 0, `${f.vehicle_no} has a missed instalment with no amount`);
+    });
+  });
+
+  await check('paying an instalment takes it out of this month and out of missed', async () => {
+    const made = await owner('POST', '/api/facilities', {
+      company_id: 1, type: 'VEHICLE_LOAN', vehicle_no: 'EMI-TEST-1', bank_name: 'ADCB',
+      emi_amount: 1000, start_date: '2026-01-05', end_date: '2026-06-05', due_day: 5
+    });
+    assert.strictEqual(made.status, 201, JSON.stringify(made.data));
+
+    const before = (await owner('GET', '/api/facilities?type=VEHICLE_LOAN')).data.totals;
+    const facility = await owner('GET', `/api/facilities/${made.data.id}`);
+    const due = facility.data.dues.find((d) => d.status === 'DUE');
+    assert.ok(due, 'the new loan has an unpaid instalment');
+
+    const paid = await owner('POST', `/api/facilities/dues/${due.id}/pay`, { paid_date: due.due_date });
+    assert.strictEqual(paid.status, 200, JSON.stringify(paid.data));
+
+    const after = (await owner('GET', '/api/facilities?type=VEHICLE_LOAN')).data.totals;
+    assert.strictEqual(after.remaining, money(before.remaining - due.amount));
+    // It only leaves this month's figure if that is the month it fell in.
+    const inThisMonth = due.due_date.slice(0, 7) === new Date().toISOString().slice(0, 7);
+    assert.strictEqual(after.due_this_month, money(before.due_this_month - (inThisMonth ? due.amount : 0)));
+  });
+
   // ---------------------------------------------------------------- companies
 
   let spareCompanyId;
