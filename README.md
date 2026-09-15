@@ -227,6 +227,20 @@ only brings in the ones that have not cleared, as a register.
 Running it twice is safe: an invoice already recorded for the same supplier is
 skipped rather than duplicated.
 
+## Moving data onto a hosted copy
+
+The importer needs the spreadsheet on the same machine, which a hosted container
+does not have. So import locally, then carry the result across:
+
+1. Run the import against a local checkout, as above.
+2. Sign in to the local copy as the owner, **Account &rarr; Download backup**.
+3. Sign in to the hosted copy, **Account &rarr; Restore from a backup**, choose that
+   file and type REPLACE.
+
+Restoring replaces everything in the app. Whatever was there is saved to
+`data/backups/` first, so a wrong file can be undone. The same screen is the way
+back after a mistake: download a backup regularly and you can always return to it.
+
 ## Running it for real
 
 The system is built to sit on the office network or behind the company VPN.
@@ -261,7 +275,7 @@ The system is built to sit on the office network or behind the company VPN.
 npm test
 ```
 
-76 end-to-end checks across three files. `test/smoke.js` covers the rules that
+82 end-to-end checks across three files. `test/smoke.js` covers the rules that
 matter: terms counted from the
 submitted date, overdue flagging, a cheque staying a commitment until it clears
 and going back onto the payable when it bounces, allocations never exceeding what
@@ -270,7 +284,8 @@ the requester to approve, and each role being held to its permissions.
 
 `test/hosted.js` covers what changes once the app is hosted: first-run accounts,
 weak passwords never reaching a deployment, storage surviving a redeploy, the sign
-in throttle, and who may take a backup.
+in throttle, who may take a backup, and that restoring one replaces the data,
+keeps a copy of what it replaced and leaves the app usable.
 
 `test/facilities.js` covers the monthly view: instalment schedules, an instalment
 dated the 31st landing on the last day of February, LCs falling due once, PDC and

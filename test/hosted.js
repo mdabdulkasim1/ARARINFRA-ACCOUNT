@@ -62,9 +62,9 @@ function client() {
     if (setCookie) cookie = setCookie.split(';')[0];
     const type = res.headers.get('content-type') || '';
     if (!type.includes('application/json')) {
-      return { status: res.status, raw: Buffer.from(await res.arrayBuffer()) };
+      return { status: res.status, cookie, raw: Buffer.from(await res.arrayBuffer()) };
     }
-    return { status: res.status, data: await res.json() };
+    return { status: res.status, cookie, data: await res.json() };
   };
 }
 
@@ -184,6 +184,12 @@ async function main() {
 
   const owner = client();
   const accountant = client();
+  // The raw-body restore calls go through fetch directly, so the cookies the
+  // clients picked up at sign in have to be reachable.
+  let ownerCookieValue = '';
+  let accountantCookieValue = '';
+  const ownerCookie = () => ownerCookieValue;
+  const accountantCookie = () => accountantCookieValue;
 
   await check('locking one account does not lock out everybody else on the same connection', async () => {
     // The whole office shares one public address, so this is the case that
@@ -197,6 +203,7 @@ async function main() {
       email: 'owner@ararinfra.com', password: 'Known@Password1'
     });
     assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+    ownerCookieValue = r.cookie;
   });
 
   await check('the owner can download a backup of the whole database', async () => {
@@ -217,8 +224,95 @@ async function main() {
       email: 'accountant1@ararinfra.com', password: 'Known@Password1'
     });
     assert.strictEqual(login.status, 200, JSON.stringify(login.data));
+    accountantCookieValue = login.cookie;
     const r = await accountant('GET', '/api/admin/backup');
     assert.strictEqual(r.status, 403);
+  });
+
+  // ---------------------------------------------------------------- restore
+
+  await check('a file that is not a database is refused', async () => {
+    const res = await fetch(`${base}/api/admin/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', Cookie: ownerCookie() },
+      body: Buffer.from('this is definitely not a database')
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.match(data.error, /not a database file/i);
+  });
+
+  await check('restoring a backup replaces what is in the app', async () => {
+    // Build a backup that holds one recognisable invoice.
+    const fixture = path.join(tmpDir, 'fixture.db');
+    db.prepare('VACUUM INTO ?').run(fixture);
+    const src = new (require('better-sqlite3'))(fixture);
+    src.prepare(
+      "INSERT INTO suppliers (code, name, payment_terms_days) VALUES ('RST', 'Restored Supplier', 60)"
+    ).run();
+    const supplierId = src.prepare("SELECT id FROM suppliers WHERE code = 'RST'").get().id;
+    const companyId = src.prepare('SELECT id FROM companies ORDER BY id').get().id;
+    src.prepare(
+      `INSERT INTO purchase_invoices
+         (company_id, supplier_id, invoice_no, invoice_date, submitted_date,
+          payment_terms_days, due_date, currency, subtotal, tax_amount, total_amount, status)
+       VALUES (?, ?, 'RESTORED-1', '2026-01-01', '2026-01-01', 60, '2026-03-02', 'AED', 500, 0, 500, 'OPEN')`
+    ).run(companyId, supplierId);
+    src.close();
+
+    assert.strictEqual(
+      db.prepare("SELECT COUNT(*) c FROM purchase_invoices WHERE invoice_no = 'RESTORED-1'").get().c,
+      0, 'the invoice should not be there before the restore'
+    );
+
+    const res = await fetch(`${base}/api/admin/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', Cookie: ownerCookie() },
+      body: fs.readFileSync(fixture)
+    });
+    const data = await res.json();
+    assert.strictEqual(res.status, 200, JSON.stringify(data));
+    assert.strictEqual(data.invoices_after, 1);
+    assert.strictEqual(
+      db.prepare("SELECT COUNT(*) c FROM purchase_invoices WHERE invoice_no = 'RESTORED-1'").get().c,
+      1, 'the restored invoice is missing'
+    );
+    assert.strictEqual(
+      db.prepare("SELECT COUNT(*) c FROM suppliers WHERE code = 'RST'").get().c, 1
+    );
+  });
+
+  await check('the app is still usable after a restore', async () => {
+    // Accounts come across with the backup, so signing in has to still work.
+    const after = client();
+    const login = await after('POST', '/api/auth/login', {
+      email: 'owner@ararinfra.com', password: 'Known@Password1'
+    });
+    assert.strictEqual(login.status, 200, JSON.stringify(login.data));
+    const dash = await after('GET', '/api/reports/dashboard');
+    assert.strictEqual(dash.status, 200);
+    assert.ok(dash.data.kpi.payable_total >= 500);
+  });
+
+  await check('a copy of what was there is kept before the restore', () => {
+    const backupDir = path.join(config.dataDir, 'backups');
+    const files = fs.readdirSync(backupDir).filter((f) => f.startsWith('before-restore-'));
+    assert.ok(files.length >= 1, 'no safety copy was written');
+  });
+
+  await check('the restore is recorded in the audit trail', () => {
+    const row = db.prepare("SELECT * FROM audit_log WHERE action = 'RESTORE' ORDER BY id DESC").get();
+    assert.ok(row, 'no restore entry was written');
+    assert.match(row.summary, /restored the database/i);
+  });
+
+  await check('an accountant cannot restore the database', async () => {
+    const res = await fetch(`${base}/api/admin/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', Cookie: accountantCookie() },
+      body: Buffer.from('SQLite format 3\u0000padding')
+    });
+    assert.strictEqual(res.status, 403);
   });
 
   await check('the owner can see whether storage will survive a redeploy', async () => {

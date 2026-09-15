@@ -245,6 +245,7 @@
         <div class="btn-row" style="margin-top:16px">
           <button class="btn" data-act="password">Change password</button>
           ${C.can('settings.edit') ? '<button class="btn" data-act="backup">Download backup</button>' : ''}
+          ${C.can('settings.edit') ? '<button class="btn" data-act="restore">Restore from a backup</button>' : ''}
           <button class="btn danger" data-act="logout">Sign out</button>
         </div>
         ${C.can('settings.edit')
@@ -253,6 +254,9 @@
       footer: null
     });
     modal.querySelector('[data-act="password"]').onclick = () => { Modal.close(); changePasswordForm(false); };
+
+    const restoreBtn = modal.querySelector('[data-act="restore"]');
+    if (restoreBtn) restoreBtn.onclick = () => { Modal.close(); restoreForm(); };
 
     const backupBtn = modal.querySelector('[data-act="backup"]');
     if (backupBtn) {
@@ -270,6 +274,96 @@
       showLogin('You have signed out.');
     };
   };
+
+  /** Replace everything in the app with the contents of a backup file. */
+  function restoreForm() {
+    const modal = Modal.open({
+      title: 'Restore from a backup',
+      subtitle: 'Everything currently in the app is replaced',
+      body: `
+        <div class="alert warn">
+          <b>This replaces all the data in the app</b> with whatever is in the file you
+          choose - invoices, payments, petty cash, suppliers, everyone's accounts.
+          A copy of what is here now is saved first, so nothing is lost for good.
+        </div>
+        <div class="field required">
+          <label>Backup file</label>
+          <input type="file" id="restore-file" accept=".db,application/octet-stream">
+          <div class="hint">A <b>.db</b> file downloaded from this app, or prepared for you.</div>
+        </div>
+        <div class="field">
+          <label>Type <b>REPLACE</b> to confirm</label>
+          <input type="text" id="restore-confirm" autocomplete="off" placeholder="REPLACE">
+        </div>
+        <div class="alert error" id="restore-error" hidden></div>
+        <div id="restore-progress" hidden>
+          <div class="mini-note">Uploading and restoring, this can take a moment&hellip;</div>
+        </div>`,
+      footer: `<button class="btn" data-act="cancel">Cancel</button>
+               <button class="btn danger" data-act="go">Replace everything</button>`
+    });
+    modal.querySelector('[data-act="cancel"]').onclick = () => Modal.close();
+
+    const fail = (message) => {
+      const box = modal.querySelector('#restore-error');
+      box.textContent = message;
+      box.hidden = false;
+    };
+
+    modal.querySelector('[data-act="go"]').onclick = async () => {
+      const file = modal.querySelector('#restore-file').files[0];
+      const typed = modal.querySelector('#restore-confirm').value.trim().toUpperCase();
+      modal.querySelector('#restore-error').hidden = true;
+
+      if (!file) return fail('Choose the backup file first');
+      if (typed !== 'REPLACE') return fail('Type REPLACE in the box to confirm');
+
+      const btn = modal.querySelector('[data-act="go"]');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span> Restoring';
+      modal.querySelector('#restore-progress').hidden = false;
+
+      try {
+        // Sent as the raw body rather than a form, so the server does not need a
+        // multipart parser just for this one screen.
+        const res = await fetch('/api/admin/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: file,
+          credentials: 'same-origin'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Restore failed (${res.status})`);
+
+        Modal.close();
+        Modal.open({
+          title: 'Restored',
+          size: 'narrow',
+          body: `
+            <p>The app now holds:</p>
+            <dl class="kv">
+              <dt>Companies</dt><dd>${fmt.int(data.counts.companies)}</dd>
+              <dt>Suppliers</dt><dd>${fmt.int(data.counts.suppliers)}</dd>
+              <dt>Supplier invoices</dt><dd><b>${fmt.int(data.counts.purchase_invoices)}</b></dd>
+              <dt>Payments</dt><dd>${fmt.int(data.counts.payments)}</dd>
+              <dt>Users</dt><dd>${fmt.int(data.counts.users)}</dd>
+            </dl>
+            <p class="mini-note" style="margin-top:12px">
+              What was here before was saved as <b>${esc(data.safety_copy)}</b> in the data folder.
+            </p>`,
+          footer: '<button class="btn primary" data-act="reload">Reload the app</button>',
+          onMount: (m) => {
+            m.querySelector('[data-act="reload"]').onclick = () => window.location.reload();
+          }
+        });
+      } catch (err) {
+        modal.querySelector('#restore-progress').hidden = true;
+        fail(err.message);
+        btn.disabled = false;
+        btn.textContent = 'Replace everything';
+      }
+    };
+  }
 
   function changePasswordForm(forced) {
     const modal = Modal.open({
