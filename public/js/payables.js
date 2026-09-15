@@ -1084,8 +1084,32 @@
                 { label: 'Bank', render: (b) => `<b>${esc(b.bank)}</b>` },
                 { label: 'Cheques', num: true, render: (b) => fmt.int(b.count) },
                 { label: 'Amount', num: true, render: (b) => fmt.money(b.amount) }
-              ], { empty: 'No cheques' })}
+              ], {
+                empty: 'No cheques',
+                footer: ['<b>Total</b>', fmt.int(data.count), `<b>${fmt.money(data.total)}</b>`]
+              })}
             </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <header>
+            <h3>By supplier</h3>
+            <span class="sub">who is holding these cheques, largest first</span>
+          </header>
+          <div class="body tight">
+            ${C.table(data.by_supplier, [
+              { label: 'Supplier', render: (b) =>
+                  `<a href="#/supplier/${b.supplier_id}"><b>${esc(b.supplier_name)}</b></a>` +
+                  ` <span class="mini-note">${esc(b.supplier_code || '')}</span>` },
+              { label: 'Cheques', num: true, render: (b) => fmt.int(b.count) },
+              { label: 'First dated', hidePhone: true, render: (b) => `<span class="nowrap">${fmt.date(b.first_cheque_date)}</span>` },
+              { label: 'Last dated', hidePhone: true, render: (b) => `<span class="nowrap">${fmt.date(b.last_cheque_date)}</span>` },
+              { label: 'Amount', num: true, render: (b) => `<b>${fmt.money(b.amount)}</b>` }
+            ], {
+              empty: 'No cheques',
+              footer: ['<b>Total</b>', fmt.int(data.count), '', '', `<b>${fmt.money(data.total)}</b>`]
+            })}
           </div>
         </div>
 

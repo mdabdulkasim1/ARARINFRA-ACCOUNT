@@ -104,6 +104,18 @@
 
       <div class="card">
         <header>
+          <h3>Cheques out, supplier by supplier</h3>
+          <span class="sub">who is holding the group's paper</span>
+          <span class="spacer"></span>
+          <a class="btn small" href="#/pdc">Cheque register</a>
+        </header>
+        <div class="body tight">
+          ${pdcSuppliers(data.pdc_by_supplier, data.kpi.pdc_outstanding_total, data.kpi.pdc_outstanding_count)}
+        </div>
+      </div>
+
+      <div class="card">
+        <header>
           <h3>Cheques coming up</h3>
           <span class="sub">the next few to be presented</span>
           <span class="spacer"></span>
@@ -345,6 +357,51 @@
         <span class="mb-amt"><b>${fmt.money(total)}</b></span>
       </div>
     </div>`;
+  }
+
+  /**
+   * The cheques still to clear, by who is holding them.
+   *
+   * Only the largest are listed - a long tail of small cheques tells the owner
+   * nothing - but the rest are kept as one line so the total is still the PDC
+   * issued figure and nothing looks as though it has gone missing.
+   */
+  const PDC_SUPPLIERS_SHOWN = 10;
+
+  function pdcSuppliers(suppliers, total, count) {
+    if (!suppliers || !suppliers.length) {
+      return '<div class="empty"><div class="big">&#128179;</div><div>No cheques are waiting to clear</div></div>';
+    }
+    const shown = suppliers.slice(0, PDC_SUPPLIERS_SHOWN);
+    const rest = suppliers.slice(PDC_SUPPLIERS_SHOWN);
+    const restAmount = rest.reduce((t, r) => t + r.amount, 0);
+    const restCount = rest.reduce((t, r) => t + r.count, 0);
+
+    return C.table(shown, [
+      { label: 'Supplier', render: (r) =>
+          `<a href="#/supplier/${r.supplier_id}"><b>${esc(r.supplier_name)}</b></a>` +
+          ` <span class="mini-note">${esc(r.supplier_code || '')}</span>` },
+      { label: 'Cheques', num: true, render: (r) => fmt.int(r.count) },
+      { label: 'From', hidePhone: true, render: (r) =>
+          `<span class="nowrap">${fmt.date(r.first_cheque_date)}</span>` },
+      { label: 'To', hidePhone: true, render: (r) =>
+          `<span class="nowrap">${fmt.date(r.last_cheque_date)}</span>` },
+      { label: 'Cheques out', num: true, render: (r) => `<b>${fmt.money(r.amount)}</b>` }
+    ], {
+      empty: 'No cheques are waiting to clear',
+      emptyIcon: '&#128179;',
+      footer: [
+        rest.length
+          ? `<b>Total</b> <span class="mini-note">including ${fmt.int(rest.length)} more supplier(s) on ${fmt.money(restAmount)}</span>`
+          : '<b>Total</b>',
+        fmt.int(count),
+        '',
+        '',
+        `<b>${fmt.money(total)}</b>`
+      ]
+    }) + (rest.length
+      ? `<div class="mini-note" style="padding:8px 2px 0">${fmt.int(restCount)} more cheque(s) are spread across ${fmt.int(rest.length)} other supplier(s).</div>`
+      : '');
   }
 
   function monthlyBars(cashOut, income) {

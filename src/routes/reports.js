@@ -240,6 +240,26 @@ router.get('/dashboard', (req, res, next) => {
       .all(...ids)
       .map((r) => ({ ...r, amount: money(r.amount), is_past: r.month < asOf.slice(0, 7) }));
 
+    // The same cheques again, this time by who holds them, so the owner can see
+    // which supplier is sitting on the most of the group's paper.
+    const pdcBySupplier = db
+      .prepare(
+        `SELECT s.id   AS supplier_id,
+                s.name AS supplier_name,
+                s.code AS supplier_code,
+                COUNT(*) AS count,
+                ROUND(IFNULL(SUM(p.amount), 0), 2) AS amount,
+                MIN(p.cheque_date) AS first_cheque_date,
+                MAX(p.cheque_date) AS last_cheque_date
+           FROM payments p
+           JOIN suppliers s ON s.id = p.supplier_id
+          WHERE p.company_id IN (${inList(ids)}) AND ${SQL_PDC_OUTSTANDING}
+          GROUP BY s.id
+          ORDER BY amount DESC`
+      )
+      .all(...ids)
+      .map((r) => ({ ...r, amount: money(r.amount) }));
+
     // Cheques coming up, so nothing is presented against an empty account.
     const upcomingPdc = db
       .prepare(
@@ -259,6 +279,7 @@ router.get('/dashboard', (req, res, next) => {
       overdue_invoices: invoices.filter((i) => i.is_overdue).slice(0, 25),
       upcoming_pdc: upcomingPdc,
       pdc_by_month: pdcByMonth,
+      pdc_by_supplier: pdcBySupplier,
       monthly_cash_out: monthlyCashOut(ids, 6),
       monthly_income: monthlyIncome(ids, 6)
     });
@@ -358,6 +379,23 @@ router.get('/pdc-register', (req, res, next) => {
       byMonth[m].amount = money(byMonth[m].amount + r.amount);
     });
 
+    // Who is holding the cheques.
+    const bySupplier = {};
+    rows.forEach((r) => {
+      const k = r.supplier_id;
+      bySupplier[k] = bySupplier[k] || {
+        supplier_id: k, supplier_name: r.supplier_name, supplier_code: r.supplier_code,
+        count: 0, amount: 0, first_cheque_date: null, last_cheque_date: null
+      };
+      const b = bySupplier[k];
+      b.count += 1;
+      b.amount = money(b.amount + r.amount);
+      if (r.cheque_date) {
+        if (!b.first_cheque_date || r.cheque_date < b.first_cheque_date) b.first_cheque_date = r.cheque_date;
+        if (!b.last_cheque_date || r.cheque_date > b.last_cheque_date) b.last_cheque_date = r.cheque_date;
+      }
+    });
+
     // Which of our own banks the cheques are drawn on.
     const byBank = {};
     rows.forEach((r) => {
@@ -372,6 +410,7 @@ router.get('/pdc-register', (req, res, next) => {
       total: money(rows.reduce((s, r) => s + r.amount, 0)),
       count: rows.length,
       by_month: Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month)),
+      by_supplier: Object.values(bySupplier).sort((a, b) => b.amount - a.amount),
       by_bank: Object.values(byBank).sort((a, b) => b.amount - a.amount)
     });
   } catch (err) {

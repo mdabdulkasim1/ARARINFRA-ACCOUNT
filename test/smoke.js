@@ -522,6 +522,43 @@ async function main() {
     assert.ok(r.data.by_bank.some((b) => b.bank === 'Mashreq Bank'));
   });
 
+  await check('the dashboard splits the cheques out by supplier', async () => {
+    const r = await owner('GET', '/api/reports/dashboard');
+    const suppliers = r.data.pdc_by_supplier;
+    assert.ok(suppliers.length >= 1, 'the cheques entered above are in there');
+
+    // Same money again, this time by who holds it, so it has to come back to the
+    // PDC issued figure exactly.
+    const amount = suppliers.reduce((t, x) => money(t + x.amount), 0);
+    const count = suppliers.reduce((t, x) => t + x.count, 0);
+    assert.strictEqual(amount, r.data.kpi.pdc_outstanding_total, 'suppliers add up to PDC issued');
+    assert.strictEqual(count, r.data.kpi.pdc_outstanding_count, 'cheque counts add up');
+
+    // Largest first, one line per supplier, each with the span its cheques cover.
+    const amounts = suppliers.map((x) => x.amount);
+    assert.deepStrictEqual(amounts, [...amounts].sort((a, b) => b - a), 'largest first');
+    assert.strictEqual(new Set(suppliers.map((x) => x.supplier_id)).size, suppliers.length);
+    suppliers.forEach((x) => {
+      assert.ok(x.supplier_name, 'named');
+      assert.ok(x.first_cheque_date <= x.last_cheque_date, 'the span runs forwards');
+    });
+  });
+
+  await check('the cheque register agrees with the dashboard on who holds what', async () => {
+    const dash = await owner('GET', '/api/reports/dashboard');
+    const reg = await owner('GET', '/api/reports/pdc-register');
+
+    assert.strictEqual(reg.data.by_supplier.length, dash.data.pdc_by_supplier.length);
+    assert.strictEqual(
+      money(reg.data.by_supplier.reduce((t, x) => t + x.amount, 0)),
+      reg.data.total,
+      'the supplier split adds up to the cheques listed'
+    );
+    // Same top supplier, same figure, whichever screen it is read from.
+    assert.strictEqual(reg.data.by_supplier[0].supplier_id, dash.data.pdc_by_supplier[0].supplier_id);
+    assert.strictEqual(reg.data.by_supplier[0].amount, dash.data.pdc_by_supplier[0].amount);
+  });
+
   await check('the dashboard splits the cheque load by the month on the cheque', async () => {
     const r = await owner('GET', '/api/reports/dashboard');
     const months = r.data.pdc_by_month;
