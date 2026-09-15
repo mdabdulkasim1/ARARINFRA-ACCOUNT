@@ -91,18 +91,32 @@
 
         <div class="card">
           <header>
-            <h3>Cheques coming up</h3>
+            <h3>Cheques month by month</h3>
+            <span class="sub">by the date on the cheque</span>
             <span class="spacer"></span>
             <a class="btn small" href="#/pdc">All cheques</a>
           </header>
           <div class="body tight">
-            ${C.table(data.upcoming_pdc.slice(0, 8), [
-              { label: 'Cheque date', render: (r) => `<span class="nowrap ${r.cheque_date < C.today() ? 'amount-danger' : ''}">${fmt.date(r.cheque_date)}</span>` },
-              { label: 'Cheque no', key: 'cheque_no', mono: true },
-              { label: 'Supplier', render: (r) => esc(r.supplier_name) },
-              { label: 'Amount', num: true, render: (r) => `<b>${fmt.money(r.amount)}</b>` }
-            ], { empty: 'No cheques are waiting to clear', emptyIcon: '&#128179;' })}
+            ${pdcMonths(data.pdc_by_month, data.kpi.pdc_outstanding_total)}
           </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <header>
+          <h3>Cheques coming up</h3>
+          <span class="sub">the next few to be presented</span>
+          <span class="spacer"></span>
+          <a class="btn small" href="#/pdc">All cheques</a>
+        </header>
+        <div class="body tight">
+          ${C.table(data.upcoming_pdc.slice(0, 8), [
+            { label: 'Cheque date', render: (r) => `<span class="nowrap ${r.cheque_date < C.today() ? 'amount-danger' : ''}">${fmt.date(r.cheque_date)}</span>` },
+            { label: 'Cheque no', key: 'cheque_no', mono: true },
+            { label: 'Supplier', render: (r) => esc(r.supplier_name) },
+            { label: 'Bank', hidePhone: true, render: (r) => esc(r.cheque_bank_name || r.from_bank_name || '-') },
+            { label: 'Amount', num: true, render: (r) => `<b>${fmt.money(r.amount)}</b>` }
+          ], { empty: 'No cheques are waiting to clear', emptyIcon: '&#128179;' })}
         </div>
       </div>
 
@@ -300,6 +314,37 @@
         });
       }
     });
+  }
+
+  /**
+   * The cheque load month by month, on the date written on the cheque.
+   *
+   * This is the same money as the PDC issued figure at the top, split by when it
+   * lands, so the months always add back up to it. A month already past is a
+   * cheque the bank could present today, so it is shown in red.
+   */
+  function pdcMonths(months, total) {
+    if (!months || !months.length) {
+      return '<div class="empty"><div class="big">&#128179;</div><div>No cheques are waiting to clear</div></div>';
+    }
+    const max = Math.max(1, ...months.map((m) => m.amount));
+    const thisMonth = C.today().slice(0, 7);
+
+    return `<div class="month-bars">${months.map((m) => `
+      <a class="month-bar ${m.is_past ? 'is-past' : ''} ${m.month === thisMonth ? 'is-now' : ''}"
+         href="#/monthly?month=${esc(m.month)}" title="Everything falling due in ${esc(fmt.month(m.month))}">
+        <span class="mb-month">${esc(fmt.month(m.month))}</span>
+        <span class="mb-track"><i style="width:${Math.max(2, (m.amount / max) * 100)}%"></i></span>
+        <span class="mb-cnt">${fmt.int(m.count)}</span>
+        <span class="mb-amt">${fmt.money(m.amount)}</span>
+      </a>`).join('')}
+      <div class="month-bar is-total">
+        <span class="mb-month"><b>Total</b></span>
+        <span class="mb-track"></span>
+        <span class="mb-cnt">${fmt.int(months.reduce((t, m) => t + m.count, 0))}</span>
+        <span class="mb-amt"><b>${fmt.money(total)}</b></span>
+      </div>
+    </div>`;
   }
 
   function monthlyBars(cashOut, income) {
