@@ -794,6 +794,113 @@ router.get('/commitment-calendar', (req, res, next) => {
   }
 });
 
+// ------------------------------------------------------------------ payable forecast
+
+/**
+ * What each supplier is owed, spread across the months the money actually falls
+ * due - the shape the group already keeps by hand, supplier down the side and
+ * month across the top.
+ *
+ * Two ways of deciding which month an invoice lands in:
+ *
+ *   assumed  invoices are treated as submitted on a fixed day of their submission
+ *            month and paid a fixed number of days later. This is the planning
+ *            view: "everything submitted in August, on 90 day terms, is due in
+ *            November", regardless of what each individual bill says.
+ *   actual   each invoice's own due date, worked out from its own terms.
+ *
+ * Only what is still outstanding is counted; a settled invoice needs no cash.
+ */
+router.get('/supplier-forecast', (req, res, next) => {
+  try {
+    const ids = scope(req);
+    const basis = String(req.query.basis || 'assumed').toLowerCase() === 'actual' ? 'actual' : 'assumed';
+    const terms = Math.min(Math.max(Number(req.query.terms || 90), 0), 365);
+    const anchorDay = Math.min(Math.max(Number(req.query.day || 5), 1), 28);
+    const monthCount = Math.min(Math.max(Number(req.query.months || 12), 1), 36);
+
+    const invoices = openInvoices(ids);
+
+    /** The month this invoice's money is needed in. */
+    const dueMonthFor = (inv) => {
+      if (basis === 'actual') {
+        return inv.due_date ? inv.due_date.slice(0, 7) : null;
+      }
+      const base = inv.submitted_date || inv.invoice_date;
+      if (!base) return null;
+      // Treat it as submitted on the same day of that month, then add the terms.
+      const anchor = `${base.slice(0, 7)}-${String(anchorDay).padStart(2, '0')}`;
+      return addDays(anchor, terms).slice(0, 7);
+    };
+
+    const bySupplier = new Map();
+    const monthsSeen = new Set();
+    let unscheduled = 0;
+
+    invoices.forEach((inv) => {
+      const month = dueMonthFor(inv);
+      const amount = money(inv.outstanding);
+      if (!month) { unscheduled = money(unscheduled + amount); return; }
+      monthsSeen.add(month);
+
+      if (!bySupplier.has(inv.supplier_id)) {
+        bySupplier.set(inv.supplier_id, {
+          supplier_id: inv.supplier_id,
+          supplier_code: inv.supplier_code,
+          supplier_name: inv.supplier_name,
+          months: {},
+          total: 0,
+          invoices: 0
+        });
+      }
+      const row = bySupplier.get(inv.supplier_id);
+      row.months[month] = money((row.months[month] || 0) + amount);
+      row.total = money(row.total + amount);
+      row.invoices += 1;
+    });
+
+    // Show a continuous run of months, so an empty one is visibly empty rather
+    // than silently missing from the middle of the table.
+    const sorted = [...monthsSeen].sort();
+    let months = [];
+    if (sorted.length) {
+      const first = req.query.from ? String(req.query.from).slice(0, 7) : sorted[0];
+      const cursor = new Date(`${first}-01T00:00:00Z`);
+      for (let i = 0; i < monthCount; i += 1) {
+        months.push(cursor.toISOString().slice(0, 7));
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      }
+      // Anything falling outside the window still has to be shown somewhere.
+      const shown = new Set(months);
+      const before = sorted.filter((m) => !shown.has(m) && m < months[0]);
+      const after = sorted.filter((m) => !shown.has(m) && m > months[months.length - 1]);
+      if (before.length) months = [...before, ...months];
+      if (after.length) months = [...months, ...after];
+    }
+
+    const rows = [...bySupplier.values()].sort((a, b) => b.total - a.total);
+
+    const monthTotals = {};
+    months.forEach((m) => {
+      monthTotals[m] = money(rows.reduce((t, r) => t + (r.months[m] || 0), 0));
+    });
+
+    res.json({
+      basis,
+      terms,
+      anchor_day: anchorDay,
+      months,
+      rows,
+      month_totals: monthTotals,
+      total: money(rows.reduce((t, r) => t + r.total, 0)),
+      supplier_count: rows.length,
+      unscheduled
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ------------------------------------------------------------------ audit trail
 
 router.get('/audit', requirePermission('audit.view'), (req, res, next) => {

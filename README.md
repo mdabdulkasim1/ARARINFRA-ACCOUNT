@@ -88,7 +88,9 @@ and so on, or edited under Masters &rarr; Users.
 2. **Masters &rarr; Our bank accounts** - add the accounts money goes out from. These
    become the banks your cheques are drawn on.
 3. **Masters &rarr; Suppliers** - name, their bank (used as the default for transfers)
-   and the agreed credit period.
+   and the agreed credit period, chosen from the periods the group actually uses
+   (immediate, 7, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180 days) or typed in
+   for an unusual deal.
 4. **Masters &rarr; Employees** - petty cash is always requested in an employee's name.
 5. **Masters &rarr; Users** - change the passwords and decide which companies each
    accountant may work in.
@@ -147,6 +149,20 @@ A cheque then moves through its life in the **Cheque register**:
 issued &rarr; presented &rarr; cleared, or bounced, cancelled, replaced.
 Only *cleared* reduces the payable.
 
+### Payable by supplier and month
+
+Supplier down the side, month across the top: the shape the group already kept by
+hand. Each open invoice's outstanding amount is placed in the month its payment
+falls due, worked out either way:
+
+- **a fixed credit period** - invoices are treated as submitted on a chosen day of
+  their submission month and paid a set number of days later. This is the planning
+  view: everything submitted in August, on 90 day terms, is needed in November.
+- **each invoice's own terms** - the real due date of each bill.
+
+Both add up to the same total; they only disagree about which month the money is
+needed in. Exports to CSV in the same layout.
+
 ### Bank facilities
 
 Vehicle loans, equipment loans and letters of credit are entered once, with the
@@ -199,6 +215,7 @@ The sidebar shows a count of requests waiting on you.
 | **Loans & LC** | Vehicle and equipment loans by monthly instalment, and letters of credit |
 | **Income** | Customer invoices and money received |
 | **Supplier ageing** | Each supplier split into not due / 1-30 / 31-60 / 61-90 / 90+ days late |
+| **Supplier x month** | What each supplier is owed, placed in the month the cash falls due |
 | **Group summary** | All six companies side by side, with year to date figures |
 | **Where money went** | The payment register for a period, broken down by mode |
 | **Petty cash by staff** | Who drew how much, on what, and over which months |

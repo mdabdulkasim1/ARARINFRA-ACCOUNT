@@ -249,8 +249,8 @@
               hint: 'Leave blank if not received yet' }
           ] },
           { type: 'group', className: 'grid-3', fields: [
-            { name: 'payment_terms_days', label: 'Payment terms (days)', type: 'number', required: true,
-              step: '1', value: invoice ? invoice.payment_terms_days : (supplier ? supplier.payment_terms_days : C.State.defaultTerms) },
+            { name: 'payment_terms_days', label: 'Payment terms', type: 'terms', required: true,
+              value: invoice ? invoice.payment_terms_days : (supplier ? supplier.payment_terms_days : C.State.defaultTerms) },
             { type: 'html', html: `
               <div class="field">
                 <label>Payment due on</label>
@@ -319,6 +319,13 @@
       const s = C.State.suppliers.find((x) => String(x.id) === supplierSel.value);
       if (s && !isEdit) {
         terms.value = s.payment_terms_days;
+        // Move the dropdown with it, or it keeps showing the previous supplier's terms.
+        const select = modal.querySelector('[data-terms-select="payment_terms_days"]');
+        if (select) {
+          const known = [...select.options].some((o) => o.value === String(s.payment_terms_days));
+          select.value = known ? String(s.payment_terms_days) : '__other';
+          terms.hidden = known;
+        }
         syncDue();
       }
     };

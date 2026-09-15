@@ -274,6 +274,69 @@
   // ---------------------------------------------------------------- forms
 
   /**
+   * The credit periods actually used across the group, taken from the purchase
+   * log. Anything else can still be typed in, so an unusual deal is not blocked.
+   */
+  const TERM_OPTIONS = [
+    { value: 0, label: 'Immediate (paid on submission)' },
+    { value: 7, label: '7 days' },
+    { value: 15, label: '15 days' },
+    { value: 20, label: '20 days' },
+    { value: 30, label: '30 days' },
+    { value: 45, label: '45 days' },
+    { value: 60, label: '60 days' },
+    { value: 75, label: '75 days' },
+    { value: 90, label: '90 days' },
+    { value: 105, label: '105 days' },
+    { value: 120, label: '120 days' },
+    { value: 150, label: '150 days' },
+    { value: 180, label: '180 days' }
+  ];
+
+  /** A dropdown of the usual terms, with a box for anything unusual. */
+  function termsFieldHtml(field) {
+    const current = field.value === null || field.value === undefined || field.value === ''
+      ? null
+      : Number(field.value);
+    const known = current !== null && TERM_OPTIONS.some((o) => o.value === current);
+    const id = `f_${field.name}`;
+    const options = TERM_OPTIONS.map((o) =>
+      `<option value="${o.value}" ${current === o.value ? 'selected' : ''}>${esc(o.label)}</option>`
+    ).join('');
+    return `
+      <div class="field ${field.required ? 'required' : ''}" data-field="${esc(field.name)}">
+        <label for="${id}">${esc(field.label || 'Payment terms')}</label>
+        <select id="${id}" data-terms-select="${esc(field.name)}">
+          ${options}
+          <option value="__other" ${current !== null && !known ? 'selected' : ''}>Other number of days&hellip;</option>
+        </select>
+        <input type="number" step="1" min="0" max="1095" name="${esc(field.name)}"
+               value="${current === null ? 90 : current}"
+               data-terms-input="${esc(field.name)}"
+               style="margin-top:6px" ${current !== null && !known ? '' : 'hidden'}>
+        ${field.hint ? `<div class="hint">${esc(field.hint)}</div>` : ''}
+      </div>`;
+  }
+
+  // Keep the hidden number box in step with the dropdown; it is the field that
+  // actually submits, so the two must never disagree.
+  document.addEventListener('change', (e) => {
+    const select = e.target.closest('[data-terms-select]');
+    if (!select) return;
+    const name = select.dataset.termsSelect;
+    const input = select.parentNode.querySelector(`[data-terms-input="${name}"]`);
+    if (!input) return;
+    if (select.value === '__other') {
+      input.hidden = false;
+      input.focus();
+      input.select();
+    } else {
+      input.hidden = true;
+      input.value = select.value;
+    }
+  });
+
+  /**
    * Build a form from a simple field list.
    * { name, label, type, value, options, required, hint, colspan, attrs }
    */
@@ -283,6 +346,7 @@
         return `<div class="${f.className || 'grid-2'}">${formFields(f.fields)}</div>`;
       }
       if (f.type === 'html') return f.html;
+      if (f.type === 'terms') return termsFieldHtml(f);
       const id = `f_${f.name}`;
       const req = f.required ? 'required' : '';
       const attrs = Object.entries(f.attrs || {}).map(([k, v]) => `${k}="${esc(v)}"`).join(' ');
@@ -379,15 +443,19 @@
                 ${opts.emptyHint ? `<div class="mini-note" style="margin-top:6px">${esc(opts.emptyHint)}</div>` : ''}
               </div>`;
     }
+    // A width has to reach the cells as well: in a wide table the browser
+    // otherwise squeezes the named column down to fit the numeric ones.
+    const widthStyle = (c) => (c.width ? `style="min-width:${c.width}"` : '');
+
     const head = columns.map((c) =>
-      `<th class="${c.num ? 'num' : ''}" ${c.width ? `style="width:${c.width}"` : ''}>${esc(c.label)}</th>`
+      `<th class="${c.num ? 'num' : ''}" ${widthStyle(c)}>${esc(c.label)}</th>`
     ).join('');
 
     const body = rows.map((row, i) => {
       const cls = opts.rowClass ? opts.rowClass(row) : '';
       const cells = columns.map((c) => {
         const v = c.render ? c.render(row, i) : esc(row[c.key]);
-        return `<td class="${c.num ? 'num' : ''} ${c.mono ? 'mono' : ''}">${v === null || v === undefined ? '' : v}</td>`;
+        return `<td class="${c.num ? 'num' : ''} ${c.mono ? 'mono' : ''}" ${widthStyle(c)}>${v === null || v === undefined ? '' : v}</td>`;
       }).join('');
       return `<tr class="${cls}" ${opts.rowAttrs ? opts.rowAttrs(row) : ''}>${cells}</tr>`;
     }).join('');
@@ -489,7 +557,7 @@
   window.Core = {
     State, can, companyParam, companyName,
     API, esc, fmt, today, addDays,
-    badge, STATUS_BADGE, MODE_LABEL,
+    badge, STATUS_BADGE, MODE_LABEL, TERM_OPTIONS,
     toast, Modal,
     formFields, readForm, showFormError, wireSave,
     table, invoiceRowClass, downloadCsv, opt

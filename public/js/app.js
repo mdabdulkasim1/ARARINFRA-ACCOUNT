@@ -16,6 +16,7 @@
     'facilities': { title: 'Bank facilities', perm: 'facility.view', render: (h, q) => window.Monthly.renderFacilities(h, q) },
     'income': { title: 'Income', perm: 'sales.view', render: (h, q) => window.Income.render(h, q) },
     'ageing': { title: 'Supplier ageing', perm: 'report.view', render: (h) => window.Reports.renderAgeing(h) },
+    'forecast': { title: 'Payable by supplier and month', perm: 'report.view', render: (h) => window.Reports.renderForecast(h) },
     'group': { title: 'Group summary', perm: 'report.group', render: (h) => window.Reports.renderGroup(h) },
     'cash-out': { title: 'Where the money went', perm: 'report.view', render: (h) => window.Reports.renderCashOut(h) },
     'petty-report': { title: 'Petty cash by employee', perm: 'report.view', render: (h) => window.Reports.renderPettySummary(h) },
@@ -41,6 +42,7 @@
     ] },
     { group: 'Reports', items: [
       { href: '#/ageing', icon: '&#9202;', label: 'Supplier ageing', key: 'ageing', perm: 'report.view' },
+      { href: '#/forecast', icon: '&#128198;', label: 'Supplier x month', key: 'forecast', perm: 'report.view' },
       { href: '#/group', icon: '&#127970;', label: 'Group summary', key: 'group', perm: 'report.group' },
       { href: '#/cash-out', icon: '&#8595;', label: 'Where money went', key: 'cash-out', perm: 'report.view' },
       { href: '#/petty-report', icon: '&#128100;', label: 'Petty cash by staff', key: 'petty-report', perm: 'report.view' },

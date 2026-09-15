@@ -348,6 +348,164 @@
       </div>`).join('')}</div>`;
   }
 
+  // ---------------------------------------------------------------- payable forecast
+
+  const forecastState = { basis: 'assumed', terms: 90, day: 5, months: 12 };
+
+  /** Supplier down the side, month across the top - when the cash is needed. */
+  async function renderForecast(host) {
+    host.innerHTML = `
+      <div class="toolbar">
+        <div>
+          <h2 style="font-size:17px">Payable by supplier and month</h2>
+          <div class="mini-note">What each supplier is owed, placed in the month the money falls due.</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="field">
+          <label>Work out the due month from</label>
+          <select id="fc-basis">
+            <option value="assumed">A fixed credit period</option>
+            <option value="actual">Each invoice's own terms</option>
+          </select>
+        </div>
+        <div class="field" id="fc-terms-wrap">
+          <label>Credit period</label>
+          <select id="fc-terms"></select>
+        </div>
+        <div class="field" id="fc-day-wrap">
+          <label>Submitted on day</label>
+          <input type="number" id="fc-day" min="1" max="28" value="${forecastState.day}" style="width:82px">
+        </div>
+        <button class="btn" id="fc-export">Export CSV</button>
+        <button class="btn" onclick="window.print()">Print</button>
+      </div>
+      <div id="fc-body"><div class="loading">Working out the forecast&hellip;</div></div>`;
+
+    const termsSel = host.querySelector('#fc-terms');
+    termsSel.innerHTML = C.TERM_OPTIONS
+      .map((o) => `<option value="${o.value}" ${o.value === forecastState.terms ? 'selected' : ''}>${esc(o.label)}</option>`)
+      .join('');
+    host.querySelector('#fc-basis').value = forecastState.basis;
+
+    const sync = () => {
+      const assumed = host.querySelector('#fc-basis').value === 'assumed';
+      host.querySelector('#fc-terms-wrap').hidden = !assumed;
+      host.querySelector('#fc-day-wrap').hidden = !assumed;
+    };
+    const reload = () => {
+      forecastState.basis = host.querySelector('#fc-basis').value;
+      forecastState.terms = Number(termsSel.value);
+      forecastState.day = Number(host.querySelector('#fc-day').value || 5);
+      sync();
+      draw(host);
+    };
+    host.querySelector('#fc-basis').onchange = reload;
+    termsSel.onchange = reload;
+    host.querySelector('#fc-day').onchange = reload;
+    sync();
+
+    await draw(host);
+  }
+
+  async function draw(host) {
+    const box = host.querySelector('#fc-body');
+    box.innerHTML = '<div class="loading">Working out the forecast&hellip;</div>';
+
+    const params = new URLSearchParams({
+      basis: forecastState.basis,
+      terms: String(forecastState.terms),
+      day: String(forecastState.day),
+      months: String(forecastState.months)
+    });
+    if (C.State.companyId) params.set('company_id', C.State.companyId);
+    const d = await API.get(`/api/reports/supplier-forecast?${params}`);
+
+    if (!d.rows.length) {
+      box.innerHTML = '<div class="card"><div class="empty"><div class="big">&#128202;</div>' +
+        '<div>Nothing is outstanding</div></div></div>';
+      return;
+    }
+
+    const cur = esc(C.State.currency);
+    const peak = d.months.reduce((best, m) =>
+      (d.month_totals[m] || 0) > (d.month_totals[best] || 0) ? m : best, d.months[0]);
+
+    const columns = [
+      // Wide enough that a long trading name does not wrap into five lines and
+      // drag every month column down with it.
+      { label: 'Supplier', width: '250px', render: (r) =>
+          `<a href="#/supplier/${r.supplier_id}"><b>${esc(r.supplier_name)}</b></a>
+           <br><span class="mini-note">${esc(r.supplier_code)} &middot; ${fmt.int(r.invoices)} invoice(s)</span>` }
+    ].concat(d.months.map((m) => ({
+      label: fmt.month(m), num: true,
+      render: (r) => r.months[m]
+        ? `<span class="${m === peak ? 'strong' : ''}">${fmt.money(r.months[m])}</span>`
+        : '<span class="mini-note">-</span>'
+    }))).concat([
+      { label: 'Total', num: true, render: (r) => `<b>${fmt.money(r.total)}</b>` }
+    ]);
+
+    box.innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi is-primary">
+          <div class="label">Total payable</div>
+          <div class="value"><span class="cur">${cur}</span>${fmt.compact(d.total)}</div>
+          <div class="foot">${fmt.int(d.supplier_count)} suppliers</div>
+        </div>
+        <div class="kpi is-warn">
+          <div class="label">Heaviest month</div>
+          <div class="value"><span class="cur">${cur}</span>${fmt.compact(d.month_totals[peak] || 0)}</div>
+          <div class="foot">${esc(fmt.month(peak))}</div>
+        </div>
+        <div class="kpi is-accent">
+          <div class="label">Months covered</div>
+          <div class="value">${fmt.int(d.months.length)}</div>
+          <div class="foot">${d.basis === 'assumed'
+            ? `Assuming ${d.terms} days from the ${ordinal(d.anchor_day)} of the month submitted`
+            : "Using each invoice's own terms"}</div>
+        </div>
+        ${d.unscheduled ? `
+          <div class="kpi is-danger">
+            <div class="label">No date to place it</div>
+            <div class="value"><span class="cur">${cur}</span>${fmt.compact(d.unscheduled)}</div>
+            <div class="foot">Invoices with no submitted date</div>
+          </div>` : ''}
+      </div>
+
+      <div class="card">
+        <header>
+          <h3>Supplier by month</h3>
+          <span class="sub">${d.basis === 'assumed'
+            ? `submitted on the ${ordinal(d.anchor_day)}, paid ${d.terms} days later`
+            : "each invoice's own due date"}</span>
+        </header>
+        <div class="body tight" id="fc-table"></div>
+      </div>`;
+
+    box.querySelector('#fc-table').innerHTML = C.table(d.rows, columns, {
+      empty: 'Nothing outstanding',
+      footer: ['<b>Total</b>']
+        .concat(d.months.map((m) => `<b>${fmt.money(d.month_totals[m] || 0)}</b>`))
+        .concat([`<b>${fmt.money(d.total)}</b>`])
+    });
+
+    host.querySelector('#fc-export').onclick = () => {
+      C.downloadCsv(`payable-by-supplier-and-month-${C.today()}.csv`,
+        [{ label: 'Supplier', key: 'supplier_name' }, { label: 'Code', key: 'supplier_code' }]
+          .concat(d.months.map((m) => ({ label: fmt.month(m), value: (r) => r.months[m] || 0 })))
+          .concat([{ label: 'Total', key: 'total' }]),
+        d.rows);
+    };
+  }
+
+  function ordinal(n) {
+    const v = Number(n);
+    const suffix = (v % 10 === 1 && v !== 11) ? 'st'
+      : (v % 10 === 2 && v !== 12) ? 'nd'
+      : (v % 10 === 3 && v !== 13) ? 'rd' : 'th';
+    return `${v}${suffix}`;
+  }
+
   // ---------------------------------------------------------------- audit
 
   async function renderAudit(host) {
@@ -395,6 +553,6 @@
   }
 
   window.Reports = {
-    renderAgeing, renderGroup, renderCashOut, renderPettySummary, renderAudit
+    renderAgeing, renderGroup, renderCashOut, renderPettySummary, renderAudit, renderForecast
   };
 })();

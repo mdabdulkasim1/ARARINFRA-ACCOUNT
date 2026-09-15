@@ -273,6 +273,10 @@ a.kpi:hover { text-decoration: none; border-color: var(--border-strong); box-sha
 
 .table-scroll { overflow-x: auto; max-width: 100%; }
 
+/* A wide matrix (supplier down, months across) keeps the names readable and
+   lets the months scroll, rather than squeezing the first column to nothing. */
+table.data th[style*="width"] { white-space: normal; }
+
 table.data {
   width: 100%;
   border-collapse: collapse;

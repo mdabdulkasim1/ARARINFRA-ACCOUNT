@@ -72,7 +72,7 @@
       { label: 'Supplier', render: (r) => `<a href="#/supplier/${r.id}"><b>${esc(r.name)}</b></a>` },
       { label: 'Contact', render: (r) => `${esc(r.contact_person || '-')}<br><span class="mini-note">${esc(r.phone || '')}</span>` },
       { label: 'Bank', render: (r) => `${esc(r.bank_name || '-')}<br><span class="mini-note">${esc(r.iban || r.bank_account_no || '')}</span>` },
-      { label: 'Terms', num: true, render: (r) => `${r.payment_terms_days} days` },
+      { label: 'Terms', num: true, render: (r) => `<b>${r.payment_terms_days}</b> days` },
       { label: 'TRN', render: (r) => esc(r.trn || '-') },
       { label: 'Active', render: (r) => r.active ? '<span class="badge green">Yes</span>' : '<span class="badge grey">No</span>' },
       { label: '', render: (r) => C.can('master.edit')
@@ -101,7 +101,7 @@
         ] },
         { type: 'group', className: 'grid-2', fields: [
           { name: 'trn', label: 'TRN / tax number', value: row ? row.trn : '' },
-          { name: 'payment_terms_days', label: 'Agreed credit period (days)', type: 'number', step: '1',
+          { name: 'payment_terms_days', label: 'Agreed credit period', type: 'terms',
             required: true, value: row ? row.payment_terms_days : C.State.defaultTerms,
             hint: 'Counted from the day we submit their invoice' }
         ] },
@@ -166,7 +166,7 @@
         ] },
         { type: 'group', className: 'grid-2', fields: [
           { name: 'trn', label: 'TRN', value: row ? row.trn : '' },
-          { name: 'payment_terms_days', label: 'Credit period (days)', type: 'number', step: '1',
+          { name: 'payment_terms_days', label: 'Credit period', type: 'terms',
             value: row ? row.payment_terms_days : 60 }
         ] },
         { name: 'address', label: 'Address', type: 'textarea', value: row ? row.address : '' },
