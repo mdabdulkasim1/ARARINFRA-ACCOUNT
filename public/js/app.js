@@ -240,11 +240,25 @@
         </dl>
         <div class="btn-row" style="margin-top:16px">
           <button class="btn" data-act="password">Change password</button>
+          ${C.can('settings.edit') ? '<button class="btn" data-act="backup">Download backup</button>' : ''}
           <button class="btn danger" data-act="logout">Sign out</button>
-        </div>`,
+        </div>
+        ${C.can('settings.edit')
+          ? '<p class="mini-note" style="margin:12px 0 0">The backup is the whole system in one file. Keep a copy somewhere safe.</p>'
+          : ''}`,
       footer: null
     });
     modal.querySelector('[data-act="password"]').onclick = () => { Modal.close(); changePasswordForm(false); };
+
+    const backupBtn = modal.querySelector('[data-act="backup"]');
+    if (backupBtn) {
+      backupBtn.onclick = () => {
+        // A plain navigation, so the browser saves the file rather than the
+        // fetch wrapper pulling a database into memory.
+        window.location.href = '/api/admin/backup';
+        toast('Preparing the backup, your download will start shortly', 'ok');
+      };
+    }
     modal.querySelector('[data-act="logout"]').onclick = async () => {
       await API.post('/api/auth/logout');
       Modal.closeAll();

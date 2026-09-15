@@ -3,21 +3,26 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const config = require('./config');
 
-const DB_FILE = process.env.DB_FILE
-  ? path.resolve(process.env.DB_FILE)
-  : path.join(__dirname, '..', 'data', 'arar-accounts.db');
+const DB_FILE = config.dbFile;
 
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+config.ensureDataDir();
 
 const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-/** Create anything that is missing. Safe to run on every boot. */
+/** Create anything that is missing, then apply pending schema changes. */
 function migrate() {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
+
+  const { runMigrations } = require('./migrations');
+  const applied = runMigrations(db);
+  if (applied.length) {
+    console.log(`[db] applied ${applied.length} schema change(s): ${applied.join(', ')}`);
+  }
 }
 
 /**

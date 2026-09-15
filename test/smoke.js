@@ -23,6 +23,7 @@ process.env.DB_FILE = tmpDb;
 process.env.JWT_SECRET = 'test-secret-for-the-smoke-test-only';
 process.env.DEFAULT_CURRENCY = 'AED';
 process.env.DEFAULT_PAYMENT_TERMS_DAYS = '90';
+process.env.AUTO_BOOTSTRAP = 'false';   // this file builds its own fixtures
 
 const app = require('../src/server');
 const { db } = require('../src/db');

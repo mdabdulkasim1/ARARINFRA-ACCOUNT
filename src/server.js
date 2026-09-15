@@ -6,10 +6,16 @@ const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 
+const config = require('./config');
 const { migrate, DB_FILE, db } = require('./db');
 const { requireAuth } = require('./auth');
+const { bootstrap } = require('./bootstrap');
 
 migrate();
+
+// A hosted deployment starts with an empty database and nobody who can sign in.
+// This only does anything when there are no users at all.
+const firstRun = config.autoBootstrap ? bootstrap() : { created: false };
 
 const app = express();
 app.set('trust proxy', 1);
@@ -33,6 +39,7 @@ app.use('/api/payments', require('./routes/payments'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/petty-cash', require('./routes/pettycash'));
 app.use('/api/reports', require('./routes/reports'));
+app.use('/api/admin', require('./routes/admin'));
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -81,14 +88,26 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || 'Something went wrong' });
 });
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = config.port;
 if (require.main === module) {
-  app.listen(PORT, () => {
+  // 0.0.0.0 so the container's proxy can reach it; on a desktop this is localhost.
+  app.listen(PORT, '0.0.0.0', () => {
     const count = db.prepare('SELECT COUNT(*) c FROM users').get().c;
     console.log('');
     console.log('  ARAR INFRA - ACCOUNTS');
-    console.log(`  running on   http://localhost:${PORT}`);
-    console.log(`  database     ${DB_FILE}`);
+    console.log(`  listening on port ${PORT}`);
+    console.log(`  database          ${DB_FILE}`);
+    if (firstRun.created) {
+      console.log(`  first run         created ${firstRun.companies} companies and ${firstRun.users} users`);
+    }
+    if (!config.storageIsPersistent) {
+      console.log('');
+      console.log('  ****************************************************************');
+      console.log('  WARNING: this container has no persistent volume attached.');
+      console.log('  Everything entered will be LOST on the next deploy or restart.');
+      console.log('  Attach a volume and set its mount path before entering real data.');
+      console.log('  ****************************************************************');
+    }
     if (count === 0) {
       console.log('');
       console.log('  No users yet. Run:  npm run seed');

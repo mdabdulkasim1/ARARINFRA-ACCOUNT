@@ -13,6 +13,8 @@ require('dotenv').config();
 
 const { db, migrate, nextDocNo } = require('./db');
 const { hashPassword } = require('./auth');
+const { generatePassword } = require('./bootstrap');
+const config = require('./config');
 const { money, today, addDays, computeDueDate } = require('./util');
 
 const args = process.argv.slice(2);
@@ -68,12 +70,22 @@ const companies = db.prepare('SELECT * FROM companies ORDER BY id').all();
 
 // ------------------------------------------------------------------ users
 
+// These starter passwords are published in the README, which is fine on a laptop
+// or an office machine and not fine on anything reachable from the internet. On a
+// hosted deployment they are replaced with generated ones.
 const USERS = [
   { name: 'Owner',              email: 'owner@ararinfra.com',       role: 'OWNER',           password: 'Owner@2026' },
   { name: 'Finance Manager',    email: 'finance@ararinfra.com',     role: 'FINANCE_MANAGER', password: 'Finance@2026' },
   { name: 'Accountant One',     email: 'accountant1@ararinfra.com', role: 'ACCOUNTANT',      password: 'Accounts@2026' },
   { name: 'Accountant Two',     email: 'accountant2@ararinfra.com', role: 'ACCOUNTANT',      password: 'Accounts@2026' }
 ];
+
+if (config.isProduction) {
+  USERS.forEach((u) => { u.password = generatePassword(); });
+  console.log('');
+  console.log('  This looks like a hosted deployment, so the starter passwords from the');
+  console.log('  README were not used. Generated ones are printed below - save them.');
+}
 
 const insUser = db.prepare(
   `INSERT OR IGNORE INTO users (name, email, password_hash, role, active, must_change_password)

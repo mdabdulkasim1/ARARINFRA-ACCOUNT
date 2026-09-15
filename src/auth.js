@@ -3,31 +3,13 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { db } = require('./db');
+const config = require('./config');
 const { forbidden } = require('./util');
 
 const COOKIE = 'arar_session';
 
-function secret() {
-  const s = process.env.JWT_SECRET;
-  if (!s || s === 'change-this-to-a-long-random-secret-string') {
-    // Works out of the box, but every restart logs everybody out - which is the
-    // nudge to set a real secret in .env before going live.
-    if (!global.__ARAR_DEV_SECRET) {
-      global.__ARAR_DEV_SECRET = require('crypto').randomBytes(48).toString('hex');
-      console.warn(
-        '[auth] JWT_SECRET is not set in .env - using a temporary one. ' +
-          'Everyone will be logged out when the server restarts.'
-      );
-    }
-    return global.__ARAR_DEV_SECRET;
-  }
-  return s;
-}
-
-function sessionHours() {
-  const h = Number(process.env.SESSION_HOURS || 12);
-  return Number.isFinite(h) && h > 0 ? h : 12;
-}
+const secret = config.sessionSecret;
+const sessionHours = config.sessionHours;
 
 function hashPassword(plain) {
   return bcrypt.hashSync(String(plain), 10);
@@ -49,11 +31,17 @@ function issueToken(user) {
   );
 }
 
-function setSessionCookie(res, token) {
+/**
+ * Mark the cookie secure whenever the request arrived over HTTPS. Behind a proxy
+ * that terminates TLS (Railway does) `req.secure` reads X-Forwarded-Proto, which
+ * is why the app sets `trust proxy`. Falling back to the request rather than
+ * NODE_ENV means the cookie is right on a plain http:// office server too.
+ */
+function setSessionCookie(res, token, req) {
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: req ? !!req.secure : config.isProduction,
     maxAge: sessionHours() * 3600 * 1000
   });
 }

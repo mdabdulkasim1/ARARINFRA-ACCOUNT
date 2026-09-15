@@ -340,3 +340,56 @@ CREATE TABLE IF NOT EXISTS doc_counters (
   scope             TEXT PRIMARY KEY,
   last_no           INTEGER NOT NULL DEFAULT 0
 );
+
+-- ---------------------------------------------------------------- bank facilities
+
+-- Vehicle loans, letters of credit and anything else owed to a bank on a date
+-- rather than to a supplier against an invoice.
+CREATE TABLE IF NOT EXISTS bank_facilities (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id        INTEGER NOT NULL REFERENCES companies(id),
+  type              TEXT    NOT NULL
+                    CHECK (type IN ('VEHICLE_LOAN','EQUIPMENT_LOAN','TERM_LOAN','LC','TRUST_RECEIPT','OTHER')),
+  reference         TEXT,                          -- loan account or LC number
+  vehicle_no        TEXT,                          -- plate number, for vehicle loans
+  description       TEXT,
+  bank_name         TEXT    NOT NULL,
+  bank_account_id   INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL,
+  supplier_id       INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,  -- LC beneficiary
+  currency          TEXT    NOT NULL DEFAULT 'AED',
+  principal_amount  REAL    NOT NULL DEFAULT 0,
+  emi_amount        REAL    NOT NULL DEFAULT 0,    -- the monthly instalment
+  due_day           INTEGER NOT NULL DEFAULT 1,    -- day of the month it is taken
+  start_date        TEXT,
+  end_date          TEXT,                          -- last instalment, or LC maturity
+  status            TEXT    NOT NULL DEFAULT 'ACTIVE'
+                    CHECK (status IN ('ACTIVE','CLOSED','CANCELLED')),
+  notes             TEXT,
+  created_by        INTEGER REFERENCES users(id),
+  created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fac_company ON bank_facilities(company_id);
+CREATE INDEX IF NOT EXISTS idx_fac_type    ON bank_facilities(type);
+
+-- One row per instalment. Monthly for a loan, a single row for an LC maturity.
+CREATE TABLE IF NOT EXISTS facility_dues (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  facility_id       INTEGER NOT NULL REFERENCES bank_facilities(id) ON DELETE CASCADE,
+  company_id        INTEGER NOT NULL REFERENCES companies(id),
+  due_date          TEXT    NOT NULL,
+  amount            REAL    NOT NULL,
+  status            TEXT    NOT NULL DEFAULT 'DUE'
+                    CHECK (status IN ('DUE','PAID','SKIPPED')),
+  paid_date         TEXT,
+  paid_mode         TEXT    CHECK (paid_mode IS NULL OR paid_mode IN ('BANK_TRANSFER','CASH','CHEQUE','AUTO_DEBIT','ONLINE','OTHER')),
+  paid_ref          TEXT,
+  paid_by           INTEGER REFERENCES users(id),
+  notes             TEXT,
+  created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (facility_id, due_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_due_month   ON facility_dues(due_date);
+CREATE INDEX IF NOT EXISTS idx_due_company ON facility_dues(company_id);

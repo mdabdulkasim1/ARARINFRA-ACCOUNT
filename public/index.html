@@ -6,7 +6,8 @@
   <title>ARAR INFRA - Accounts</title>
   <meta name="description" content="Payables, PDC and petty cash control for the ARAR INFRA group">
   <link rel="stylesheet" href="/css/app.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%2313314f'/><text x='32' y='43' font-size='30' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>A</text></svg>">
+  <link rel="icon" href="/img/logo.png">
+  <link rel="alternate icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%232e3192'/><text x='32' y='44' font-size='32' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>A</text></svg>">
 </head>
 <body>
 
@@ -14,8 +15,10 @@
   <div id="login" class="login-wrap" hidden>
     <div class="login-card">
       <div class="brand">
-        <div class="mark">AI</div>
-        <h1>ARAR INFRA &middot; Accounts</h1>
+        <img src="/img/logo.png" alt="Arar INFRA" class="brand-logo" hidden
+             onload="this.hidden=false;this.parentNode.querySelector('.wordmark').hidden=true">
+        <div class="wordmark"><span class="w-arar">Arar</span> <span class="w-infra">INFRA</span></div>
+        <h1>Accounts</h1>
         <p>Payables, cheques and petty cash control</p>
       </div>
       <div id="login-error" class="alert error" hidden></div>
@@ -40,8 +43,12 @@
   <div id="app" class="app" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="logo">
-        <strong>ARAR INFRA</strong>
-        <span>Accounts</span>
+        <img src="/img/logo.png" alt="" class="side-logo" hidden
+             onload="this.hidden=false">
+        <div>
+          <strong>ARAR INFRA</strong>
+          <span>Accounts</span>
+        </div>
       </div>
       <nav class="nav" id="nav"></nav>
     </aside>

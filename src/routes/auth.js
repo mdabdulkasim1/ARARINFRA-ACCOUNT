@@ -7,6 +7,7 @@ const {
   requireAuth, permissionsFor, allowedCompanyIds, ROLES
 } = require('../auth');
 const { badRequest, isBlank } = require('../util');
+const throttle = require('../ratelimit');
 
 const router = express.Router();
 
@@ -14,18 +15,31 @@ router.post('/login', (req, res, next) => {
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
     const password = String(req.body.password || '');
+
+    const wait = throttle.retryAfter(req, email);
+    if (wait > 0) {
+      res.set('Retry-After', String(wait));
+      return res.status(429).json({
+        error: `Too many failed sign in attempts for this account. Try again in ${Math.ceil(wait / 60)} minute(s).`
+      });
+    }
+
     if (!email || !password) throw badRequest('Enter your email and password');
 
     const user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email);
     if (!user || !checkPassword(password, user.password_hash)) {
+      throttle.recordFailure(req, email);
+      // Deliberately the same message either way, so the form cannot be used to
+      // find out which email addresses exist.
       return res.status(401).json({ error: 'Email or password is not correct' });
     }
     if (!user.active) {
       return res.status(403).json({ error: 'This account has been deactivated' });
     }
 
+    throttle.recordSuccess(req, email);
     db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(user.id);
-    setSessionCookie(res, issueToken(user));
+    setSessionCookie(res, issueToken(user), req);
     audit({ user, ip: req.ip }, {
       action: 'LOGIN', entity: 'user', entity_id: user.id, summary: `${user.name} signed in`
     });
