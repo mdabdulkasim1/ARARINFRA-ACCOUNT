@@ -623,6 +623,11 @@ button.bar-row:hover .bar-fill { filter: brightness(1.08); }
 
 /* The cheque load month by month. Each row is a link through to everything
    falling due in that month, so it has to stop looking like body text. */
+/* The standing warning that the data will not survive a deploy. It sits between
+   the top bar and the page so it cannot be scrolled past or missed. */
+#storage-banner { padding: 14px 22px 0; }
+@media (max-width: 720px) { #storage-banner { padding: 12px 14px 0; } }
+
 .month-bars { display: flex; flex-direction: column; }
 .month-bar {
   display: grid;
@@ -733,7 +738,7 @@ a.month-bar:hover { background: var(--surface-2); }
 @media (min-width: 881px) { .nav-backdrop { display: none !important; } }
 
 @media print {
-  .sidebar, .topbar, .toolbar, .btn, .tabs { display: none !important; }
+  .sidebar, .topbar, .toolbar, .btn, .tabs, #storage-banner { display: none !important; }
   .content { padding: 0; }
   .card { box-shadow: none; border-color: #bbb; break-inside: avoid; }
   body { background: #fff; }

@@ -132,6 +132,7 @@
     };
 
     buildNav();
+    checkStorage();
     await refreshPendingCount();
     window.addEventListener('hashchange', route);
     route();
@@ -178,6 +179,102 @@
       }
     } catch { /* the badge is a nicety, never block the app for it */ }
   }
+
+  /**
+   * Warn, on every screen, when the data will not survive the next deploy.
+   *
+   * This has bitten this deployment once already: everything entered went when
+   * the container was replaced. Tucked inside the account panel it was missed,
+   * so it now sits across the top of the app until it is actually fixed, and it
+   * names the exact thing to do rather than saying something is wrong.
+   */
+  async function checkStorage() {
+    const banner = document.getElementById('storage-banner');
+    if (!banner) return;
+    banner.hidden = true;
+    if (!C.can('settings.edit')) return;      // only the people who can fix it
+    try {
+      const s = await API.get('/api/admin/system');
+      if (s.storage_is_persistent) return;
+      banner.innerHTML = `
+        <div class="alert error" style="margin:0">
+          <b>This copy has no permanent storage. Everything entered will be lost on the next deploy.</b>
+          <br>In Railway, open this service &rarr; <b>Variables &amp; Settings &rarr; Volumes</b>,
+          add a volume and mount it at <b class="mono">${esc(s.suggested_mount_path)}</b>, then redeploy.
+          ${s.db_file_is_set
+            ? '<br>A <span class="mono">DB_FILE</span> variable is also set, which can move the database off the volume. Remove it unless it points at the volume.'
+            : ''}
+        </div>`;
+      banner.hidden = false;
+    } catch { /* an accountant, or the check is unavailable - never block the app */ }
+  }
+
+  // ---------------------------------------------------------------- saving a page
+
+  /**
+   * Save whatever is on screen as a spreadsheet.
+   *
+   * Every screen is built from the same tables, so one control can save any of
+   * them rather than each page needing its own export. Each table becomes a
+   * block headed by the card it sits in, so a page with several tables still
+   * reads as the page it came from.
+   */
+  function savePage() {
+    const view = document.getElementById('view');
+    // Charts are read the same way tables are, so a page saves whole rather than
+    // quietly dropping the part that happens to be drawn as bars.
+    const blocks = [...view.querySelectorAll('table.data, .bars, .month-bars')];
+    if (!blocks.length) {
+      toast('There is nothing on this page to save', 'error');
+      return;
+    }
+
+    const cell = (v) => {
+      const t = String(v === null || v === undefined ? '' : v)
+        .replace(/\s+/g, ' ')
+        .trim();
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const rowOf = (tr) => [...tr.children].map((td) => cell(td.innerText)).join(',');
+    // A bar carries its label, its count and its amount in three boxes, one of
+    // which is the bar itself and has no text; a label box may hold two lines.
+    const barRowOf = (bar) => [...bar.children]
+      .flatMap((box) => box.innerText.split('\n'))
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map(cell)
+      .join(',');
+
+    const title = document.getElementById('page-title').textContent.trim();
+    const company = C.State.companyId ? C.companyName(C.State.companyId) : 'All companies';
+    const lines = [cell(title), cell(`${company} - saved ${fmt.date(C.today())}`), ''];
+
+    blocks.forEach((block) => {
+      const card = block.closest('.card');
+      const heading = card && card.querySelector('header h3');
+      if (heading) lines.push(cell(heading.textContent));
+      if (block.matches('table.data')) {
+        block.querySelectorAll('thead tr, tbody tr, tfoot tr').forEach((tr) => lines.push(rowOf(tr)));
+      } else {
+        block.querySelectorAll('.bar-row, .month-bar').forEach((bar) => lines.push(barRowOf(bar)));
+      }
+      lines.push('');
+    });
+
+    const stamp = C.today();
+    const name = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${stamp}.csv`;
+    const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+    toast(`Saved ${name}`, 'ok');
+  }
+
+  document.getElementById('save-btn').onclick = savePage;
+  document.getElementById('print-btn').onclick = () => window.print();
 
   // ---------------------------------------------------------------- routing
 
