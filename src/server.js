@@ -44,11 +44,18 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/admin', require('./routes/admin'));
 
 app.get('/api/health', (req, res) => {
+  const { passwordSources } = require('./bootstrap');
   res.json({
     ok: true,
     app: 'ARAR INFRA - Accounts',
     time: new Date().toISOString(),
-    companies: db.prepare('SELECT COUNT(*) c FROM companies').get().c
+    companies: db.prepare('SELECT COUNT(*) c FROM companies').get().c,
+    accounts: db.prepare('SELECT COUNT(*) c FROM users WHERE active = 1').get().c,
+    invoices: db.prepare('SELECT COUNT(*) c FROM purchase_invoices').get().c,
+    storage_survives_restart: config.storageIsPersistent,
+    // Which variable, if any, each account's password came from. No passwords and
+    // no usernames - just enough to tell a missing variable from a wrong value.
+    passwords: passwordSources()
   });
 });
 

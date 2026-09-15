@@ -166,6 +166,40 @@ async function main() {
     }
   });
 
+  await check('the owner password is accepted from ADMIN_PASSWORD too', () => {
+    const { passwordFromEnv, passwordVariableFor } = require('../src/bootstrap');
+    const before = { o: process.env.OWNER_PASSWORD, a: process.env.ADMIN_PASSWORD };
+    try {
+      delete process.env.OWNER_PASSWORD;
+      process.env.ADMIN_PASSWORD = 'admin@123';
+      assert.strictEqual(passwordVariableFor('OWNER'), 'ADMIN_PASSWORD');
+      assert.strictEqual(passwordFromEnv('OWNER'), 'admin@123');
+
+      // The documented name still wins when both are present.
+      process.env.OWNER_PASSWORD = 'from-owner-var';
+      assert.strictEqual(passwordVariableFor('OWNER'), 'OWNER_PASSWORD');
+    } finally {
+      ['OWNER_PASSWORD', 'ADMIN_PASSWORD'].forEach((k) => delete process.env[k]);
+      if (before.o !== undefined) process.env.OWNER_PASSWORD = before.o;
+      if (before.a !== undefined) process.env.ADMIN_PASSWORD = before.a;
+    }
+  });
+
+  await check('the health check says where each password came from, and no more', async () => {
+    const r = await client()('GET', '/api/health');
+    assert.strictEqual(r.status, 200);
+    assert.ok(r.data.passwords, 'no password sources reported');
+    assert.strictEqual(typeof r.data.storage_survives_restart, 'boolean');
+
+    // It must never carry anything worth stealing.
+    const body = JSON.stringify(r.data);
+    assert.ok(!/Known@Password1/.test(body), 'a password leaked into the health check');
+    assert.ok(!/admin|accountant1|finance@/.test(body), 'a username or email leaked');
+    Object.values(r.data.passwords).forEach((v) => {
+      assert.match(v, /^(set by [A-Z0-9_]+|generated at first run)$/, `unexpected value: ${v}`);
+    });
+  });
+
   await check('a password set in the environment later replaces a generated one', async () => {
     const { applyEnvPasswords } = require('../src/bootstrap');
     const before = process.env.FINANCE_PASSWORD;

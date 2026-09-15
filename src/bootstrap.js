@@ -69,15 +69,36 @@ const CATEGORIES = [
  * logged, because a password silently becoming something else is far worse than
  * one that simply does not work.
  */
+/**
+ * The variable names people reasonably reach for. The owner signs in as "admin",
+ * so ADMIN_PASSWORD is at least as likely a guess as OWNER_PASSWORD, and a
+ * password sitting in a variable the app never reads looks exactly like a wrong
+ * password from the sign in form.
+ */
+const PASSWORD_ALIASES = {
+  OWNER: ['OWNER_PASSWORD', 'ADMIN_PASSWORD'],
+  FINANCE: ['FINANCE_PASSWORD', 'FINANCE_MANAGER_PASSWORD'],
+  ACCOUNTANT1: ['ACCOUNTANT1_PASSWORD', 'ACCOUNTANT_1_PASSWORD', 'ACCOUNTS1_PASSWORD'],
+  ACCOUNTANT2: ['ACCOUNTANT2_PASSWORD', 'ACCOUNTANT_2_PASSWORD', 'ACCOUNTS2_PASSWORD']
+};
+
+/** Which variable a password was found in, or null. */
+function passwordVariableFor(key) {
+  const names = PASSWORD_ALIASES[key] || [`${key}_PASSWORD`];
+  return names.find((name) => (process.env[name] || '').trim() !== '') || null;
+}
+
 function passwordFromEnv(key) {
-  const raw = process.env[`${key}_PASSWORD`];
+  const name = passwordVariableFor(key);
+  if (!name) return null;
+  const raw = process.env[name];
   if (!raw) return null;
 
   let value = raw.trim();
   const notes = [];
 
-  if (value.startsWith(`${key}_PASSWORD=`)) {
-    value = value.slice(`${key}_PASSWORD=`.length).trim();
+  if (value.startsWith(`${name}=`)) {
+    value = value.slice(`${name}=`.length).trim();
     notes.push('dropped the variable name that was pasted in with it');
   }
   if (value.length >= 2 &&
@@ -89,12 +110,11 @@ function passwordFromEnv(key) {
   if (value !== raw && !notes.length) notes.push('trimmed the spaces around it');
 
   if (notes.length) {
-    console.warn(`  [auth] ${key}_PASSWORD: ${notes.join(', ')}.`);
+    console.warn(`  [auth] ${name}: ${notes.join(', ')}.`);
   }
   if (value.length < 8) {
     console.warn(
-      `  [auth] ${key}_PASSWORD is only ${value.length} character(s) - ignoring it. ` +
-      'It needs at least 8.'
+      `  [auth] ${name} is only ${value.length} character(s) - ignoring it. It needs at least 8.`
     );
     return null;
   }
@@ -224,6 +244,21 @@ function applyEnvPasswords() {
   return applied;
 }
 
+/**
+ * Where each account's password came from. Names of variables and roles only -
+ * never a password, and never a username - so it is safe to show publicly and
+ * settles the one question a refused sign in cannot answer on its own.
+ */
+function passwordSources() {
+  const out = {};
+  STAFF.forEach((person) => {
+    const name = passwordVariableFor(person.key);
+    out[person.key] = name ? `set by ${name}` : 'generated at first run';
+  });
+  return out;
+}
+
 module.exports = {
-  bootstrap, applyEnvPasswords, generatePassword, passwordFromEnv, usernameFor, STAFF
+  bootstrap, applyEnvPasswords, generatePassword, passwordFromEnv,
+  passwordVariableFor, passwordSources, usernameFor, STAFF
 };
