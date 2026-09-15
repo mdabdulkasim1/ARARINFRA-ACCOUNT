@@ -302,6 +302,13 @@
         input = `<input type="${f.type || 'text'}" id="${id}" name="${esc(f.name)}"
                     value="${esc(f.value === null || f.value === undefined ? '' : f.value)}"
                     ${step ? `step="${step}"` : ''} ${req} ${attrs}>`;
+        if (f.type === 'password') {
+          // Long generated passwords are easy to mistype, so let people look.
+          input = `<div class="password-wrap">${input}
+            <button type="button" class="password-eye" data-toggle-password
+                    aria-label="Show password" aria-pressed="false" title="Show password">&#128065;</button>
+          </div>`;
+        }
       }
       return `
         <div class="field ${req}" data-field="${esc(f.name)}">
@@ -463,6 +470,21 @@
       return Object.entries(MODE_LABEL).map(([value, label]) => ({ value, label }));
     }
   };
+
+  // One listener for every reveal button, including those inside modals opened later.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-toggle-password]');
+    if (!btn) return;
+    const input = btn.parentNode.querySelector('input');
+    if (!input) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.setAttribute('aria-pressed', String(!showing));
+    btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    btn.title = showing ? 'Show password' : 'Hide password';
+    btn.classList.toggle('is-showing', !showing);
+    input.focus();
+  });
 
   window.Core = {
     State, can, companyParam, companyName,

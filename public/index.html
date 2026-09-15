@@ -25,11 +25,16 @@
       <form id="login-form" autocomplete="on">
         <div class="field">
           <label for="login-email">Email</label>
-          <input type="email" id="login-email" name="email" autocomplete="username" required>
+          <input type="email" id="login-email" name="email" autocomplete="username"
+                 placeholder="name@ararinfra.com" required>
         </div>
         <div class="field">
           <label for="login-password">Password</label>
-          <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+          <div class="password-wrap">
+            <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+            <button type="button" class="password-eye" data-toggle-password
+                    aria-label="Show password" aria-pressed="false" title="Show password">&#128065;</button>
+          </div>
         </div>
         <button type="submit" class="btn primary block" id="login-btn">Sign in</button>
       </form>

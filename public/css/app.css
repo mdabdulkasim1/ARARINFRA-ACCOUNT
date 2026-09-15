@@ -384,6 +384,25 @@ input:disabled, select:disabled, textarea:disabled { background: var(--surface-2
 textarea { resize: vertical; min-height: 62px; }
 input[type="number"] { font-variant-numeric: tabular-nums; }
 
+.password-wrap { position: relative; }
+.password-wrap input { padding-right: 40px; }
+.password-eye {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 5px 8px;
+  font-size: 15px;
+  line-height: 1;
+  opacity: .4;
+  border-radius: var(--radius-sm);
+}
+.password-eye:hover { opacity: .75; background: var(--surface-2); }
+.password-eye.is-showing { opacity: .95; }
+
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 13px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 13px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 13px; }
