@@ -24,8 +24,29 @@ const dbFile = process.env.DB_FILE
   ? path.resolve(process.env.DB_FILE)
   : path.join(dataDir, 'arar-accounts.db');
 
-/** True when the data directory will still be there after a redeploy. */
-const storageIsPersistent = !onRailway || !!volume || !!process.env.DATA_DIR;
+/**
+ * True when the data directory will still be there after a redeploy.
+ *
+ * A volume only helps if the database is actually on it. Hosting panels offer to
+ * add every variable they can find in the source, DB_FILE among them, and its
+ * example value is a path inside the app - which quietly moves the database off
+ * the volume and onto disposable storage.
+ */
+const dbIsOnTheVolume = !volume || dbFile.startsWith(path.resolve(volume) + path.sep);
+const storageIsPersistent =
+  (!onRailway || !!volume || !!process.env.DATA_DIR) && dbIsOnTheVolume;
+
+if (volume && !dbIsOnTheVolume) {
+  console.warn('');
+  console.warn('  ****************************************************************');
+  console.warn('  WARNING: a volume is mounted at ' + volume);
+  console.warn('  but DB_FILE points outside it, at:');
+  console.warn('    ' + dbFile);
+  console.warn('  Everything entered will be LOST on the next deploy.');
+  console.warn('  Remove the DB_FILE variable, or set it to a path on the volume.');
+  console.warn('  ****************************************************************');
+  console.warn('');
+}
 
 const isProduction = process.env.NODE_ENV === 'production' || onRailway;
 
