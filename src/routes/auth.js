@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.post('/login', (req, res, next) => {
   try {
-    const email = String(req.body.email || '').trim().toLowerCase();
+    const email = String(req.body.email || req.body.username || '').trim().toLowerCase();
     const password = String(req.body.password || '');
 
     const wait = throttle.retryAfter(req, email);
@@ -26,7 +26,11 @@ router.post('/login', (req, res, next) => {
 
     if (!email || !password) throw badRequest('Enter your email and password');
 
-    const user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email);
+    // People sign in with whichever they remember: the short username or the
+    // full email address.
+    const user = db
+      .prepare('SELECT * FROM users WHERE lower(email) = ? OR lower(username) = ?')
+      .get(email, email);
     if (!user || !checkPassword(password, user.password_hash)) {
       throttle.recordFailure(req, email);
       // Deliberately the same message either way, so the form cannot be used to
@@ -101,6 +105,7 @@ function publicUser(u) {
   return {
     id: u.id,
     name: u.name,
+    username: u.username,
     email: u.email,
     role: u.role,
     role_label: ROLES[u.role],

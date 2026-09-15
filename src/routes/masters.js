@@ -369,12 +369,12 @@ router.post('/users', requirePermission('user.edit'), (req, res, next) => {
     if (!ROLES[b.role]) throw badRequest('Choose a valid role');
     const info = db
       .prepare(
-        `INSERT INTO users (name, email, password_hash, role, phone, active, must_change_password)
-         VALUES (?, ?, ?, ?, ?, ?, 1)`
+        `INSERT INTO users (name, username, email, password_hash, role, phone, active, must_change_password)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`
       )
       .run(
-        String(b.name).trim(), String(b.email).trim().toLowerCase(), hashPassword(b.password),
-        b.role, text(b.phone), bool(b.active, true) ? 1 : 0
+        String(b.name).trim(), text(b.username), String(b.email).trim().toLowerCase(),
+        hashPassword(b.password), b.role, text(b.phone), bool(b.active, true) ? 1 : 0
       );
     setUserCompanies(info.lastInsertRowid, b.company_ids);
     audit(req, { action: 'CREATE', entity: 'user', entity_id: info.lastInsertRowid, summary: `Added user ${b.name} (${ROLES[b.role]})` });
@@ -400,9 +400,10 @@ router.put('/users/:id', requirePermission('user.edit'), (req, res, next) => {
     }
 
     db.prepare(
-      'UPDATE users SET name = ?, email = ?, role = ?, phone = ?, active = ? WHERE id = ?'
+      'UPDATE users SET name = ?, username = ?, email = ?, role = ?, phone = ?, active = ? WHERE id = ?'
     ).run(
       String(b.name || existing.name).trim(),
+      b.username === undefined ? existing.username : text(b.username),
       String(b.email || existing.email).trim().toLowerCase(),
       b.role || existing.role, text(b.phone), bool(b.active, true) ? 1 : 0, existing.id
     );

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS companies (
 CREATE TABLE IF NOT EXISTS users (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   name              TEXT    NOT NULL,
+  username          TEXT,                          -- short sign in name, e.g. admin
   email             TEXT    NOT NULL UNIQUE,
   password_hash     TEXT    NOT NULL,
   role              TEXT    NOT NULL CHECK (role IN ('OWNER','FINANCE_MANAGER','ACCOUNTANT')),

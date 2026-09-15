@@ -238,6 +238,7 @@
       body: `
         <dl class="kv">
           <dt>Name</dt><dd>${esc(me.name)}</dd>
+          <dt>Username</dt><dd><b>${esc(me.username || '-')}</b></dd>
           <dt>Email</dt><dd>${esc(me.email)}</dd>
           <dt>Role</dt><dd>${esc(me.role_label)}</dd>
           <dt>Companies</dt><dd>${esc(C.State.companies.map((c) => c.code).join(', '))}</dd>

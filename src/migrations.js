@@ -101,7 +101,31 @@ CREATE TABLE receipts (
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
 );`;
 
+const USERNAMES = {
+  'owner@ararinfra.com': 'admin',
+  'finance@ararinfra.com': 'finance',
+  'accountant1@ararinfra.com': 'accountant1',
+  'accountant2@ararinfra.com': 'accountant2'
+};
+
 const MIGRATIONS = [
+  {
+    id: '2026-09-15-usernames',
+    description: 'Let people sign in with a short username as well as an email',
+    up(db) {
+      const columns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+      if (!columns.includes('username')) {
+        db.exec('ALTER TABLE users ADD COLUMN username TEXT');
+      }
+      // Unique, but only among the rows that have one, so accounts without a
+      // username do not collide with each other.
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username
+                 ON users(lower(username)) WHERE username IS NOT NULL`);
+
+      const set = db.prepare('UPDATE users SET username = ? WHERE lower(email) = ? AND username IS NULL');
+      Object.entries(USERNAMES).forEach(([email, username]) => set.run(username, email));
+    }
+  },
   {
     id: '2026-09-15-settled-cheque-status',
     description: 'Allow SETTLED (STL) as a cheque status on payments and receipts',

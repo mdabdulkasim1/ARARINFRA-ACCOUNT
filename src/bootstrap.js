@@ -28,12 +28,20 @@ const COMPANIES = [
   { code: 'AIP', name: 'ARAR INFRA PROJECTS' }
 ];
 
+// A username is not a secret, so it lives here. Passwords never do - they come
+// from the environment, or are generated and printed once to the deploy log.
 const STAFF = [
-  { key: 'OWNER',       name: 'Owner',           email: 'owner@ararinfra.com',       role: 'OWNER' },
-  { key: 'FINANCE',     name: 'Finance Manager', email: 'finance@ararinfra.com',     role: 'FINANCE_MANAGER' },
-  { key: 'ACCOUNTANT1', name: 'Accountant One',  email: 'accountant1@ararinfra.com', role: 'ACCOUNTANT' },
-  { key: 'ACCOUNTANT2', name: 'Accountant Two',  email: 'accountant2@ararinfra.com', role: 'ACCOUNTANT' }
+  { key: 'OWNER',       name: 'Owner',           username: 'admin',       email: 'owner@ararinfra.com',       role: 'OWNER' },
+  { key: 'FINANCE',     name: 'Finance Manager', username: 'finance',     email: 'finance@ararinfra.com',     role: 'FINANCE_MANAGER' },
+  { key: 'ACCOUNTANT1', name: 'Accountant One',  username: 'accountant1', email: 'accountant1@ararinfra.com', role: 'ACCOUNTANT' },
+  { key: 'ACCOUNTANT2', name: 'Accountant Two',  username: 'accountant2', email: 'accountant2@ararinfra.com', role: 'ACCOUNTANT' }
 ];
+
+/** The sign in name, overridable per deployment with e.g. OWNER_USERNAME. */
+function usernameFor(person) {
+  const supplied = (process.env[`${person.key}_USERNAME`] || '').trim();
+  return supplied || person.username;
+}
 
 // The banks the group actually uses, from the purchase log. Each company gets a
 // row per bank so a transfer can always say which account it came out of.
@@ -129,8 +137,8 @@ function bootstrap() {
     });
 
     const insUser = db.prepare(
-      `INSERT INTO users (name, email, password_hash, role, active, must_change_password)
-       VALUES (?, ?, ?, ?, 1, ?)`
+      `INSERT INTO users (name, username, email, password_hash, role, active, must_change_password)
+       VALUES (?, ?, ?, ?, ?, 1, ?)`
     );
     const insAccess = db.prepare(
       'INSERT OR IGNORE INTO user_companies (user_id, company_id) VALUES (?, ?)'
@@ -143,7 +151,7 @@ function bootstrap() {
       if (!supplied) generated.push({ ...person, email, password });
 
       const info = insUser.run(
-        person.name, email, hashPassword(password), person.role,
+        person.name, usernameFor(person), email, hashPassword(password), person.role,
         // A supplied password is the owner's own choice; a generated one must be changed.
         supplied ? 0 : 1
       );
@@ -158,7 +166,9 @@ function bootstrap() {
     console.log('  shown again. Everyone is asked to change theirs at first sign in.');
     console.log('  ----------------------------------------------------------------');
     generated.forEach((g) => {
-      console.log(`  ${g.role.padEnd(16)} ${g.email.padEnd(30)} ${g.password}`);
+      console.log(
+        `  ${g.role.padEnd(16)} ${String(usernameFor(g)).padEnd(14)} ${g.email.padEnd(30)} ${g.password}`
+      );
     });
     console.log('  ================================================================');
     console.log('');
@@ -180,6 +190,16 @@ function bootstrap() {
  */
 function applyEnvPasswords() {
   const applied = [];
+
+  // Keep the sign in names in step too, so a deployment can rename them.
+  const setUsername = db.prepare(
+    'UPDATE users SET username = ? WHERE lower(email) = ? AND IFNULL(username, \'\') <> ?'
+  );
+  STAFF.forEach((person) => {
+    try { setUsername.run(usernameFor(person), person.email.toLowerCase(), usernameFor(person)); }
+    catch { /* another account already uses that name; leave this one alone */ }
+  });
+
   STAFF.forEach((person) => {
     const supplied = passwordFromEnv(person.key);
     if (!supplied) return;
@@ -204,4 +224,6 @@ function applyEnvPasswords() {
   return applied;
 }
 
-module.exports = { bootstrap, applyEnvPasswords, generatePassword, passwordFromEnv, STAFF };
+module.exports = {
+  bootstrap, applyEnvPasswords, generatePassword, passwordFromEnv, usernameFor, STAFF
+};

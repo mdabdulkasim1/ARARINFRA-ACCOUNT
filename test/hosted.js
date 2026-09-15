@@ -84,6 +84,41 @@ async function main() {
     assert.ok(db.prepare('SELECT COUNT(*) c FROM categories').get().c > 20);
   });
 
+  await check('the owner account is reachable as "admin"', () => {
+    const owner = db.prepare("SELECT * FROM users WHERE role = 'OWNER'").get();
+    assert.strictEqual(owner.username, 'admin');
+    assert.strictEqual(owner.email, 'owner@ararinfra.com');
+  });
+
+  await check('signing in works with the username as well as the email', async () => {
+    const { hashPassword } = require('../src/auth');
+    db.prepare("UPDATE users SET password_hash = ? WHERE role = 'OWNER'")
+      .run(hashPassword('Known@Password1'));
+
+    const byUsername = await client()('POST', '/api/auth/login', {
+      email: 'admin', password: 'Known@Password1'
+    });
+    assert.strictEqual(byUsername.status, 200, JSON.stringify(byUsername.data));
+    assert.strictEqual(byUsername.data.user.username, 'admin');
+
+    const byEmail = await client()('POST', '/api/auth/login', {
+      email: 'owner@ararinfra.com', password: 'Known@Password1'
+    });
+    assert.strictEqual(byEmail.status, 200, JSON.stringify(byEmail.data));
+
+    const mixedCase = await client()('POST', '/api/auth/login', {
+      email: '  ADMIN  ', password: 'Known@Password1'
+    });
+    assert.strictEqual(mixedCase.status, 200, 'the username should not be case sensitive');
+  });
+
+  await check('an unknown username is refused like any other bad sign in', async () => {
+    const r = await client()('POST', '/api/auth/login', {
+      email: 'administrator', password: 'Known@Password1'
+    });
+    assert.strictEqual(r.status, 401);
+  });
+
   await check('all three roles exist, with one owner', () => {
     const roles = db.prepare('SELECT role, COUNT(*) c FROM users GROUP BY role').all();
     const byRole = Object.fromEntries(roles.map((r) => [r.role, r.c]));

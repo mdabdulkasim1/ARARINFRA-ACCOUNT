@@ -64,15 +64,22 @@ npm run reset -- --force
 
 ### Sign in
 
-`npm run seed` prints these. **Change every password the first time you sign in** -
-the system will prompt you to.
+Sign in with the short username or the full email address - either works.
 
-| Role | Email | Password |
+| Role | Username | Email |
 | --- | --- | --- |
-| Owner | owner@ararinfra.com | Owner@2026 |
-| Finance Manager | finance@ararinfra.com | Finance@2026 |
-| Accountant 1 | accountant1@ararinfra.com | Accounts@2026 |
-| Accountant 2 | accountant2@ararinfra.com | Accounts@2026 |
+| Owner | `admin` | owner@ararinfra.com |
+| Finance Manager | `finance` | finance@ararinfra.com |
+| Accountant 1 | `accountant1` | accountant1@ararinfra.com |
+| Accountant 2 | `accountant2` | accountant2@ararinfra.com |
+
+Passwords are never written in this repository. On a laptop, `npm run seed`
+prints starter ones and you change them at first sign in. On a hosted copy they
+come from the environment (`OWNER_PASSWORD` and friends) or are generated and
+printed once to the deploy log.
+
+Usernames can be changed per deployment with `OWNER_USERNAME`, `FINANCE_USERNAME`
+and so on, or edited under Masters &rarr; Users.
 
 ### First things to set up
 
@@ -266,6 +273,7 @@ The system is built to sit on the office network or behind the company VPN.
 | `DEFAULT_PAYMENT_TERMS_DAYS` | 90 | Credit period for a new supplier |
 | `DATA_DIR` | ./data | Where the database and session secret live - point this at a mounted volume when hosting |
 | `OWNER_PASSWORD` etc. | *(none)* | Set a password from the host's variables; reapplied on every start, so remove it once people manage their own |
+| `OWNER_USERNAME` etc. | admin, finance, accountant1, accountant2 | The name each person types to sign in |
 
 ---
 

@@ -430,6 +430,7 @@
 
     body.querySelector('#tbl').innerHTML = C.table(rows, [
       { label: 'Name', render: (r) => `<b>${esc(r.name)}</b>` },
+      { label: 'Username', mono: true, render: (r) => esc(r.username || '-') },
       { label: 'Email', render: (r) => esc(r.email) },
       { label: 'Role', render: (r) => badge(r.role_label, r.role === 'OWNER' ? 'purple' : (r.role === 'FINANCE_MANAGER' ? 'blue' : 'grey')) },
       { label: 'Companies', render: (r) => r.companies.length === C.State.companies.length
@@ -452,8 +453,10 @@
       title: row ? `Edit ${row.name}` : 'New user',
       body: `
         ${C.formFields([
-          { type: 'group', className: 'grid-2', fields: [
+          { type: 'group', className: 'grid-3', fields: [
             { name: 'name', label: 'Full name', required: true, value: row ? row.name : '' },
+            { name: 'username', label: 'Username', value: row ? row.username : '',
+              hint: 'What they type to sign in' },
             { name: 'email', label: 'Email', type: 'email', required: true, value: row ? row.email : '' }
           ] },
           { type: 'group', className: 'grid-2', fields: [
