@@ -28,7 +28,6 @@ app.use((req, res, next) => {
 
 const { router: authRouter } = require('./routes/auth');
 app.use('/api/auth', authRouter);
-app.use('/api', require('./routes/masters'));
 app.use('/api/purchase-invoices', require('./routes/purchases'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/sales', require('./routes/sales'));
@@ -59,6 +58,10 @@ app.get('/api/bootstrap', requireAuth, (req, res) => {
       .all(...ids)
   });
 });
+
+// The master data router sits on the bare /api prefix, so it is mounted last:
+// its blanket auth check would otherwise run for every route declared after it.
+app.use('/api', require('./routes/masters'));
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

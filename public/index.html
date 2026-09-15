@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ARAR INFRA - Accounts</title>
+  <meta name="description" content="Payables, PDC and petty cash control for the ARAR INFRA group">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%2313314f'/><text x='32' y='43' font-size='30' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>A</text></svg>">
+</head>
+<body>
+
+  <!-- sign in -->
+  <div id="login" class="login-wrap" hidden>
+    <div class="login-card">
+      <div class="brand">
+        <div class="mark">AI</div>
+        <h1>ARAR INFRA &middot; Accounts</h1>
+        <p>Payables, cheques and petty cash control</p>
+      </div>
+      <div id="login-error" class="alert error" hidden></div>
+      <form id="login-form" autocomplete="on">
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" name="email" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn primary block" id="login-btn">Sign in</button>
+      </form>
+      <p class="mini-note" style="text-align:center;margin:16px 0 0">
+        For internal use by ARAR INFRA group staff only.
+      </p>
+    </div>
+  </div>
+
+  <!-- the app -->
+  <div id="app" class="app" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="logo">
+        <strong>ARAR INFRA</strong>
+        <span>Accounts</span>
+      </div>
+      <nav class="nav" id="nav"></nav>
+    </aside>
+
+    <button type="button" id="nav-backdrop" class="nav-backdrop" aria-label="Close menu" hidden></button>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="menu-toggle" id="menu-toggle" aria-label="Menu">&#9776;</button>
+        <div class="page-title" id="page-title">Dashboard</div>
+        <div class="spacer"></div>
+        <div class="company-pick">
+          <label for="company-select">Company</label>
+          <select id="company-select"></select>
+        </div>
+        <div class="user-chip">
+          <div class="avatar" id="user-initials">--</div>
+          <div class="who">
+            <b id="user-name">&nbsp;</b>
+            <span id="user-role">&nbsp;</span>
+          </div>
+        </div>
+        <button class="btn small" id="account-btn" title="Account">&#9881;</button>
+      </header>
+
+      <main class="content" id="view">
+        <div class="loading">Loading&hellip;</div>
+      </main>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <div id="modal-root"></div>
+
+  <script src="/js/core.js"></script>
+  <script src="/js/dashboard.js"></script>
+  <script src="/js/payables.js"></script>
+  <script src="/js/petty.js"></script>
+  <script src="/js/income.js"></script>
+  <script src="/js/reports.js"></script>
+  <script src="/js/masters.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
