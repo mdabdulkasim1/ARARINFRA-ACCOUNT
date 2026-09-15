@@ -149,6 +149,18 @@ A cheque then moves through its life in the **Cheque register**:
 issued &rarr; presented &rarr; cleared, or bounced, cancelled, replaced.
 Only *cleared* reduces the payable.
 
+### Folding supplier accounts together
+
+A supplier list grown by hand in a spreadsheet collects the same company under
+several spellings, and internal cost pools that turn out to be one related
+business. **Masters &rarr; Suppliers &rarr; Merge** moves everything - invoices,
+payments, bank facilities - onto one account and switches the others off.
+
+Balances follow the invoices, so the group total never changes. Where the two
+accounts used the same invoice number, both are kept and the incoming one is
+marked with the code it came from rather than being dropped. Owner and finance
+manager only.
+
 ### Payable by supplier and month
 
 Supplier down the side, month across the top: the shape the group already kept by

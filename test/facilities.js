@@ -307,6 +307,74 @@ async function main() {
     assert.strictEqual(after.data.sections.emi.amount, 0);
   });
 
+  // ---------------------------------------------------------------- merging suppliers
+
+  await check('folding one supplier into another moves everything across', async () => {
+    db.prepare("INSERT INTO suppliers (code, name, payment_terms_days) VALUES ('DUP', 'Test Supplier Duplicate', 30)").run();
+    const dup = db.prepare("SELECT id FROM suppliers WHERE code = 'DUP'").get().id;
+    db.prepare(
+      `INSERT INTO purchase_invoices
+         (company_id, supplier_id, invoice_no, invoice_date, submitted_date, payment_terms_days,
+          due_date, currency, subtotal, tax_amount, total_amount, status)
+       VALUES (1, ?, 'DUP-1', '2026-02-01', '2026-02-01', 30, '2026-03-03', 'AED', 700, 0, 700, 'OPEN')`
+    ).run(dup);
+
+    const r = await owner('POST', '/api/suppliers/merge', {
+      from_supplier_ids: [dup], into_supplier_id: 1
+    });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+    assert.strictEqual(r.data.moved.invoices, 1);
+
+    assert.strictEqual(
+      db.prepare("SELECT supplier_id FROM purchase_invoices WHERE invoice_no = 'DUP-1'").get().supplier_id,
+      1, 'the invoice did not move'
+    );
+    assert.strictEqual(
+      db.prepare('SELECT active FROM suppliers WHERE id = ?').get(dup).active, 0,
+      'the folded account should be switched off, not deleted'
+    );
+  });
+
+  await check('a clashing invoice number is kept, not lost', async () => {
+    db.prepare("INSERT INTO suppliers (code, name, payment_terms_days) VALUES ('DUP2', 'Another Duplicate', 30)").run();
+    const dup = db.prepare("SELECT id FROM suppliers WHERE code = 'DUP2'").get().id;
+    // Deliberately the same number as one already under supplier 1.
+    db.prepare(
+      `INSERT INTO purchase_invoices
+         (company_id, supplier_id, invoice_no, invoice_date, submitted_date, payment_terms_days,
+          due_date, currency, subtotal, tax_amount, total_amount, status)
+       VALUES (1, ?, 'INV-M1', '2026-02-01', '2026-02-01', 30, '2026-03-03', 'AED', 900, 0, 900, 'OPEN')`
+    ).run(dup);
+
+    const before = db.prepare('SELECT COUNT(*) c FROM purchase_invoices').get().c;
+    const r = await owner('POST', '/api/suppliers/merge', {
+      from_supplier_ids: [dup], into_supplier_id: 1
+    });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+    assert.strictEqual(r.data.moved.renamed, 1, 'the clash was not renamed');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM purchase_invoices').get().c, before,
+      'an invoice went missing in the merge');
+    assert.ok(
+      db.prepare("SELECT 1 FROM purchase_invoices WHERE invoice_no = 'INV-M1 (DUP2)'").get(),
+      'the clashing invoice should be kept under a distinguishable number'
+    );
+  });
+
+  await check('a supplier cannot be folded into itself', async () => {
+    const r = await owner('POST', '/api/suppliers/merge', {
+      from_supplier_ids: [1], into_supplier_id: 1
+    });
+    assert.strictEqual(r.status, 400);
+    assert.match(r.data.error, /into itself/i);
+  });
+
+  await check('an accountant cannot fold suppliers together', async () => {
+    const r = await acc('POST', '/api/suppliers/merge', {
+      from_supplier_ids: [2], into_supplier_id: 1
+    });
+    assert.strictEqual(r.status, 403);
+  });
+
   server.close();
 
   console.log('');

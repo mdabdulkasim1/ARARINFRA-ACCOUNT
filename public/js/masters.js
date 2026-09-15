@@ -75,14 +75,92 @@
       { label: 'Terms', num: true, render: (r) => `<b>${r.payment_terms_days}</b> days` },
       { label: 'TRN', render: (r) => esc(r.trn || '-') },
       { label: 'Active', render: (r) => r.active ? '<span class="badge green">Yes</span>' : '<span class="badge grey">No</span>' },
-      { label: '', render: (r) => C.can('master.edit')
-          ? `<button class="btn small" data-id="${r.id}">Edit</button>` : '' }
+      { label: '', render: (r) => `<div class="btn-row">
+          ${C.can('master.edit') ? `<button class="btn small" data-act="edit" data-id="${r.id}">Edit</button>` : ''}
+          ${C.can('supplier.merge') && r.active ? `<button class="btn small" data-act="merge" data-id="${r.id}">Merge</button>` : ''}
+        </div>` }
     ], { empty: 'No suppliers yet', emptyIcon: '&#127970;', rowClass: (r) => r.active ? '' : 'row-muted' });
 
     wireAdd(body, () => supplierForm(null, refresh));
-    body.querySelectorAll('#tbl [data-id]').forEach((b) => {
-      b.onclick = () => supplierForm(rows.find((r) => r.id === Number(b.dataset.id)), refresh);
+    body.querySelectorAll('#tbl [data-act]').forEach((b) => {
+      const row = rows.find((r) => r.id === Number(b.dataset.id));
+      b.onclick = () => b.dataset.act === 'merge'
+        ? mergeForm(row, rows, refresh)
+        : supplierForm(row, refresh);
     });
+  }
+
+  /** Fold duplicate or internal supplier accounts into one. */
+  function mergeForm(row, allRows, after) {
+    const others = allRows.filter((r) => r.id !== row.id && r.active);
+    const modal = Modal.open({
+      title: `Fold ${row.name} into another supplier`,
+      subtitle: 'Invoices, payments and loans all move across',
+      body: `
+        <div class="alert warn">
+          Everything recorded against <b>${esc(row.name)}</b> moves to the supplier you
+          choose, and this account is switched off. Balances follow the invoices, so
+          nothing is lost - but it is not undone with a button, so check the name first.
+        </div>
+        ${C.formFields([
+          { name: 'mode', label: 'Move it into', type: 'select', value: 'existing',
+            options: [
+              { value: 'existing', label: 'A supplier that already exists' },
+              { value: 'new', label: 'A new supplier I name here' }
+            ] }
+        ])}
+        <div id="merge-existing">
+          ${C.formFields([
+            { name: 'into_supplier_id', label: 'Supplier', type: 'select',
+              options: [{ value: '', label: 'Choose a supplier' }]
+                .concat(others.map((o) => ({ value: o.id, label: `${o.name} (${o.code})` }))) }
+          ])}
+        </div>
+        <div id="merge-new" hidden>
+          ${C.formFields([
+            { name: 'into_name', label: 'New supplier name',
+              hint: 'If a supplier with this name already exists, that one is used' },
+            { type: 'terms', name: 'payment_terms_days', label: 'Credit period',
+              value: row.payment_terms_days }
+          ])}
+        </div>
+        <div class="field">
+          <label>Also fold in these accounts (optional)</label>
+          <div style="max-height:190px;overflow:auto;border:1px solid var(--border);border-radius:5px;padding:9px">
+            ${others.map((o) => `
+              <label style="display:block;font-weight:400;font-size:13px;padding:2px 0">
+                <input type="checkbox" class="also-merge" value="${o.id}" style="width:auto"> ${esc(o.name)}
+              </label>`).join('') || '<span class="mini-note">No other active suppliers</span>'}
+          </div>
+        </div>`,
+      footer: `<button class="btn" data-act="cancel">Cancel</button>
+               <button class="btn danger" data-act="save">Fold together</button>`
+    });
+    modal.querySelector('[data-act="cancel"]').onclick = () => Modal.close();
+
+    const mode = modal.querySelector('[name="mode"]');
+    const sync = () => {
+      modal.querySelector('#merge-existing').hidden = mode.value !== 'existing';
+      modal.querySelector('#merge-new').hidden = mode.value === 'existing';
+    };
+    mode.onchange = sync;
+    sync();
+
+    C.wireSave(modal, async (b) => {
+      const extra = [...modal.querySelectorAll('.also-merge:checked')].map((c) => Number(c.value));
+      const body = { from_supplier_ids: [row.id].concat(extra) };
+      if (b.mode === 'existing') {
+        if (!b.into_supplier_id) throw new Error('Choose the supplier to move everything into');
+        body.into_supplier_id = Number(b.into_supplier_id);
+      } else {
+        if (!b.into_name) throw new Error('Name the supplier everything should sit under');
+        body.into_name = b.into_name;
+        body.payment_terms_days = b.payment_terms_days;
+      }
+      const res = await API.post('/api/suppliers/merge', body);
+      await window.App.reloadLookups();
+      toast(`Moved ${res.moved.invoices} invoice(s) into ${res.into.name}`, 'ok');
+    }, { after });
   }
 
   function supplierForm(row, after) {

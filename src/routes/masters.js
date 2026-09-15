@@ -140,6 +140,119 @@ router.put('/suppliers/:id', requirePermission('master.edit'), (req, res, next) 
   }
 });
 
+/**
+ * Fold one or more supplier accounts into another.
+ *
+ * A supplier list grown by hand collects the same company several times under
+ * different spellings, and internal cost pools that turn out to be one related
+ * company. Everything moves across - invoices, payments, bank facilities - so the
+ * balances follow, and the old accounts are kept but switched off rather than
+ * deleted, because their codes appear in entries people may remember.
+ */
+router.post('/suppliers/merge', requirePermission('supplier.merge'), (req, res, next) => {
+  try {
+    const fromIds = (Array.isArray(req.body.from_supplier_ids) ? req.body.from_supplier_ids : [])
+      .map(Number)
+      .filter(Boolean);
+    if (!fromIds.length) throw badRequest('Choose the supplier account(s) to fold in');
+
+    // The target is either one that exists, or a new one named here.
+    let target;
+    if (!isBlank(req.body.into_supplier_id)) {
+      target = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(Number(req.body.into_supplier_id));
+      if (!target) throw badRequest('That supplier no longer exists');
+    } else {
+      const name = text(req.body.into_name);
+      if (!name) throw badRequest('Name the supplier everything should sit under');
+      const existing = db
+        .prepare('SELECT * FROM suppliers WHERE upper(name) = upper(?)')
+        .get(name);
+      if (existing) {
+        target = existing;
+      } else {
+        const first = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(fromIds[0]);
+        const info = db
+          .prepare(
+            `INSERT INTO suppliers (code, name, payment_terms_days, bank_name, active)
+             VALUES (?, ?, ?, ?, 1)`
+          )
+          .run(
+            (text(req.body.into_code) || nextCode('suppliers', 'SUP')).toUpperCase(),
+            name,
+            Number(req.body.payment_terms_days || (first ? first.payment_terms_days : 90)),
+            text(req.body.bank_name),
+            );
+        target = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(info.lastInsertRowid);
+      }
+    }
+
+    if (fromIds.includes(target.id)) {
+      throw badRequest('A supplier cannot be folded into itself');
+    }
+
+    const sources = fromIds
+      .map((id) => db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id))
+      .filter(Boolean);
+    if (!sources.length) throw badRequest('None of those supplier accounts exist any more');
+
+    const moved = { invoices: 0, payments: 0, facilities: 0, renamed: 0 };
+
+    db.transaction(() => {
+      sources.forEach((source) => {
+        // An invoice number only has to be unique per supplier, so folding two
+        // accounts together can collide. Keep both, and say which came from where.
+        const clashes = db
+          .prepare(
+            `SELECT a.id, a.invoice_no, a.company_id
+               FROM purchase_invoices a
+               JOIN purchase_invoices b
+                 ON b.supplier_id = ? AND b.company_id = a.company_id AND b.invoice_no = a.invoice_no
+              WHERE a.supplier_id = ?`
+          )
+          .all(target.id, source.id);
+        clashes.forEach((row) => {
+          db.prepare('UPDATE purchase_invoices SET invoice_no = ? WHERE id = ?')
+            .run(`${row.invoice_no} (${source.code})`, row.id);
+          moved.renamed += 1;
+        });
+
+        moved.invoices += db
+          .prepare('UPDATE purchase_invoices SET supplier_id = ? WHERE supplier_id = ?')
+          .run(target.id, source.id).changes;
+        moved.payments += db
+          .prepare('UPDATE payments SET supplier_id = ? WHERE supplier_id = ?')
+          .run(target.id, source.id).changes;
+        moved.facilities += db
+          .prepare('UPDATE bank_facilities SET supplier_id = ? WHERE supplier_id = ?')
+          .run(target.id, source.id).changes;
+
+        db.prepare(
+          `UPDATE suppliers
+              SET active = 0,
+                  notes = TRIM(IFNULL(notes, '') || ' Folded into ' || ? || ' on ' || date('now'))
+            WHERE id = ?`
+        ).run(target.name, source.id);
+      });
+    })();
+
+    audit(req, {
+      action: 'MERGE', entity: 'supplier', entity_id: target.id,
+      summary: `Folded ${sources.map((s) => s.name).join(', ')} into ${target.name}` +
+               ` (${moved.invoices} invoice(s), ${moved.payments} payment(s))`,
+      details: { from: sources.map((s) => ({ id: s.id, name: s.name })), into: target.id, moved }
+    });
+
+    res.json({
+      ok: true,
+      into: db.prepare('SELECT * FROM suppliers WHERE id = ?').get(target.id),
+      folded: sources.map((s) => s.name),
+      moved
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ------------------------------------------------------------------ customers
 
 router.get('/customers', (req, res) => {
