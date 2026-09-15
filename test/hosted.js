@@ -113,6 +113,47 @@ async function main() {
     rows.forEach((r) => assert.strictEqual(r.must_change_password, 1));
   });
 
+  await check('a password pasted in with its variable name still works', () => {
+    const { passwordFromEnv } = require('../src/bootstrap');
+    const before = process.env.OWNER_PASSWORD;
+    try {
+      process.env.OWNER_PASSWORD = 'OWNER_PASSWORD=owner@123';
+      assert.strictEqual(passwordFromEnv('OWNER'), 'owner@123');
+      process.env.OWNER_PASSWORD = '  owner@123  ';
+      assert.strictEqual(passwordFromEnv('OWNER'), 'owner@123');
+      process.env.OWNER_PASSWORD = '"owner@123"';
+      assert.strictEqual(passwordFromEnv('OWNER'), 'owner@123');
+      process.env.OWNER_PASSWORD = 'tiny';
+      assert.strictEqual(passwordFromEnv('OWNER'), null, 'a short password should be ignored');
+    } finally {
+      if (before === undefined) delete process.env.OWNER_PASSWORD;
+      else process.env.OWNER_PASSWORD = before;
+    }
+  });
+
+  await check('a password set in the environment later replaces a generated one', async () => {
+    const { applyEnvPasswords } = require('../src/bootstrap');
+    const before = process.env.FINANCE_PASSWORD;
+    try {
+      // Exactly the case a hosted deployment hits: accounts already exist with
+      // generated passwords, and the variables are added afterwards.
+      process.env.FINANCE_PASSWORD = 'finance@123';
+      const applied = applyEnvPasswords();
+      assert.ok(applied.includes('finance@ararinfra.com'), 'finance was not updated');
+
+      const signIn = await client()('POST', '/api/auth/login', {
+        email: 'finance@ararinfra.com', password: 'finance@123'
+      });
+      assert.strictEqual(signIn.status, 200, JSON.stringify(signIn.data));
+
+      // Running again changes nothing, because it already matches.
+      assert.strictEqual(applyEnvPasswords().length, 0, 'it rewrote a password that already matched');
+    } finally {
+      if (before === undefined) delete process.env.FINANCE_PASSWORD;
+      else process.env.FINANCE_PASSWORD = before;
+    }
+  });
+
   await check('generated passwords are long and all different', () => {
     const seen = new Set();
     for (let i = 0; i < 200; i += 1) {

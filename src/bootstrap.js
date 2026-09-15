@@ -51,6 +51,48 @@ const CATEGORIES = [
   ['Equipment rental income', 'INCOME'], ['Other income', 'INCOME']
 ];
 
+/**
+ * Read a password out of the environment, forgiving the ways a value gets
+ * mangled on the way into a hosting panel.
+ *
+ * Variables are usually handed over as `OWNER_PASSWORD=secret` lines, so the
+ * whole line ends up pasted into the value box often enough to be worth
+ * handling. Quotes and stray whitespace arrive the same way. Anything changed is
+ * logged, because a password silently becoming something else is far worse than
+ * one that simply does not work.
+ */
+function passwordFromEnv(key) {
+  const raw = process.env[`${key}_PASSWORD`];
+  if (!raw) return null;
+
+  let value = raw.trim();
+  const notes = [];
+
+  if (value.startsWith(`${key}_PASSWORD=`)) {
+    value = value.slice(`${key}_PASSWORD=`.length).trim();
+    notes.push('dropped the variable name that was pasted in with it');
+  }
+  if (value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+       (value.startsWith("'") && value.endsWith("'")))) {
+    value = value.slice(1, -1);
+    notes.push('removed the surrounding quotes');
+  }
+  if (value !== raw && !notes.length) notes.push('trimmed the spaces around it');
+
+  if (notes.length) {
+    console.warn(`  [auth] ${key}_PASSWORD: ${notes.join(', ')}.`);
+  }
+  if (value.length < 8) {
+    console.warn(
+      `  [auth] ${key}_PASSWORD is only ${value.length} character(s) - ignoring it. ` +
+      'It needs at least 8.'
+    );
+    return null;
+  }
+  return value;
+}
+
 /** Readable but strong: 4 groups of 5 from an alphabet with no lookalike characters. */
 function generatePassword() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -96,8 +138,8 @@ function bootstrap() {
 
     STAFF.forEach((person) => {
       const email = (process.env[`${person.key}_EMAIL`] || person.email).trim().toLowerCase();
-      const supplied = process.env[`${person.key}_PASSWORD`];
-      const password = supplied && supplied.length >= 8 ? supplied : generatePassword();
+      const supplied = passwordFromEnv(person.key);
+      const password = supplied || generatePassword();
       if (!supplied) generated.push({ ...person, email, password });
 
       const info = insUser.run(
@@ -139,8 +181,8 @@ function bootstrap() {
 function applyEnvPasswords() {
   const applied = [];
   STAFF.forEach((person) => {
-    const supplied = process.env[`${person.key}_PASSWORD`];
-    if (!supplied || supplied.length < 8) return;
+    const supplied = passwordFromEnv(person.key);
+    if (!supplied) return;
 
     const email = (process.env[`${person.key}_EMAIL`] || person.email).trim().toLowerCase();
     const user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email);
@@ -162,4 +204,4 @@ function applyEnvPasswords() {
   return applied;
 }
 
-module.exports = { bootstrap, applyEnvPasswords, generatePassword, STAFF };
+module.exports = { bootstrap, applyEnvPasswords, generatePassword, passwordFromEnv, STAFF };
