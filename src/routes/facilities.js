@@ -97,8 +97,11 @@ router.get('/', requirePermission('facility.view'), (req, res, next) => {
       t.monthly = money(t.monthly + (r.is_instalment ? r.emi_amount : 0));
       t.remaining = money(t.remaining + r.remaining_total);
       if (r.type === 'LC' || r.type === 'TRUST_RECEIPT') t.lc = money(t.lc + r.remaining_total);
+      t.due_this_month = money(t.due_this_month + r.due_this_month);
+      t.overdue_amount = money(t.overdue_amount + r.overdue_amount);
+      t.overdue_count += r.overdue_instalments;
       return t;
-    }, { count: 0, monthly: 0, remaining: 0, lc: 0 });
+    }, { count: 0, monthly: 0, remaining: 0, lc: 0, due_this_month: 0, overdue_amount: 0, overdue_count: 0 });
 
     res.json({ rows, totals });
   } catch (err) {
@@ -422,6 +425,11 @@ function buildSchedule(facilityId, opts) {
   }
 }
 
+/** The month we are in, as a first and last day. */
+function thisMonth() {
+  return monthRange(today().slice(0, 7));
+}
+
 function decorate(row) {
   if (!row) return row;
   const isInstalment = INSTALMENT_TYPES.includes(row.type);
@@ -434,7 +442,20 @@ function decorate(row) {
       .prepare(
         "SELECT COUNT(*) c FROM facility_dues WHERE facility_id = ? AND status = 'DUE' AND due_date < ?"
       )
-      .get(row.id, today()).c
+      .get(row.id, today()).c,
+    // What this facility still has to be paid inside the current month, so the
+    // Bank EMI screen can total the month without fetching every schedule.
+    due_this_month: money(db
+      .prepare(
+        `SELECT IFNULL(SUM(amount), 0) a FROM facility_dues
+          WHERE facility_id = ? AND status = 'DUE' AND due_date BETWEEN ? AND ?`
+      )
+      .get(row.id, thisMonth().from, thisMonth().to).a),
+    overdue_amount: money(db
+      .prepare(
+        "SELECT IFNULL(SUM(amount), 0) a FROM facility_dues WHERE facility_id = ? AND status = 'DUE' AND due_date < ?"
+      )
+      .get(row.id, today()).a)
   };
 }
 

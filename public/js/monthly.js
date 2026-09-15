@@ -244,29 +244,57 @@
   // ================================================================ bank facilities
 
   let facFilters = { type: '', q: '' };
+  /** Bank EMI is the same screen kept to the loans that repay monthly. */
+  let emiOnly = false;
 
-  async function renderFacilities(host, query) {
+  const ALL_TYPES = [
+    { value: '', label: 'All types' },
+    { value: 'VEHICLE_LOAN', label: 'Vehicle loans' },
+    { value: 'EQUIPMENT_LOAN', label: 'Equipment loans' },
+    { value: 'TERM_LOAN', label: 'Term loans' },
+    { value: 'LC', label: 'Letters of credit' },
+    { value: 'TRUST_RECEIPT', label: 'Trust receipts' },
+    { value: 'OTHER', label: 'Other' }
+  ];
+  const EMI_TYPES = [
+    { value: 'VEHICLE_LOAN', label: 'Vehicle loans' },
+    { value: 'EQUIPMENT_LOAN', label: 'Equipment loans' },
+    { value: 'TERM_LOAN', label: 'Term loans' }
+  ];
+
+  /**
+   * Bank EMI: only what the bank takes every month.
+   *
+   * The same data as Loans & LC, but the letters of credit are out of the way and
+   * the figures answer the month's question - what goes out this month, and has
+   * anything been missed.
+   */
+  async function renderEmi(host, query) {
+    emiOnly = true;
+    if (!EMI_TYPES.some((t) => t.value === facFilters.type)) facFilters.type = 'VEHICLE_LOAN';
+    return renderFacilities(host, query, true);
+  }
+
+  async function renderFacilities(host, query, emi) {
+    emiOnly = !!emi;
     if (query && query.type) facFilters.type = query.type;
+    if (!emiOnly && !ALL_TYPES.some((t) => t.value === facFilters.type)) facFilters.type = '';
+
+    const types = emiOnly ? EMI_TYPES : ALL_TYPES;
 
     host.innerHTML = `
       <div class="toolbar">
         <div>
-          <h2 style="font-size:17px">Bank facilities</h2>
-          <div class="mini-note">Vehicle and equipment loans paid monthly, and letters of credit.</div>
+          <h2 style="font-size:17px">${emiOnly ? 'Bank EMI' : 'Bank facilities'}</h2>
+          <div class="mini-note">${emiOnly
+            ? 'Vehicle and equipment loans the bank takes every month.'
+            : 'Vehicle and equipment loans paid monthly, and letters of credit.'}</div>
         </div>
         <div class="spacer"></div>
         <div class="field">
           <label>Type</label>
           <select data-filter="type">
-            ${P().optionsHtml([
-              { value: '', label: 'All types' },
-              { value: 'VEHICLE_LOAN', label: 'Vehicle loans' },
-              { value: 'EQUIPMENT_LOAN', label: 'Equipment loans' },
-              { value: 'TERM_LOAN', label: 'Term loans' },
-              { value: 'LC', label: 'Letters of credit' },
-              { value: 'TRUST_RECEIPT', label: 'Trust receipts' },
-              { value: 'OTHER', label: 'Other' }
-            ], facFilters.type)}
+            ${P().optionsHtml(types, facFilters.type)}
           </select>
         </div>
         <div class="field grow">
@@ -274,14 +302,22 @@
           <input type="search" data-filter="q" value="${esc(facFilters.q)}"
                  placeholder="Vehicle number, loan reference or bank">
         </div>
-        ${C.can('facility.edit') ? '<button class="btn primary" id="new-facility">+ New facility</button>' : ''}
+        ${C.can('facility.edit')
+          ? `<button class="btn primary" id="new-facility">+ ${emiOnly ? 'New bank EMI' : 'New facility'}</button>`
+          : ''}
       </div>
       <div id="fac-summary"></div>
       <div class="card"><div class="body tight" id="fac-table"><div class="loading">Loading&hellip;</div></div></div>`;
 
     P().bindFilters(host, facFilters, () => refreshFacilities(host));
     const nb = host.querySelector('#new-facility');
-    if (nb) nb.onclick = () => facilityForm(null, () => refreshFacilities(host));
+    if (nb) {
+      nb.onclick = () => facilityForm(
+        null,
+        () => refreshFacilities(host),
+        emiOnly ? { type: facFilters.type || 'VEHICLE_LOAN' } : null
+      );
+    }
 
     await refreshFacilities(host);
   }
@@ -296,31 +332,48 @@
     const data = await API.get(`/api/facilities?${params}`);
     const cur = esc(C.State.currency);
 
+    const t = data.totals;
+    const thisMonth = C.today().slice(0, 7);
     host.querySelector('#fac-summary').innerHTML = `
       <div class="kpi-grid" style="margin-bottom:14px">
         <div class="kpi is-primary">
           <div class="label">Every month</div>
-          <div class="value"><span class="cur">${cur}</span>${fmt.compact(data.totals.monthly)}</div>
-          <div class="foot">Total instalments across ${fmt.int(data.totals.count)} active facilities</div>
+          <div class="value"><span class="cur">${cur}</span>${fmt.compact(t.monthly)}</div>
+          <div class="foot">${emiOnly
+            ? `Across ${fmt.int(t.count)} loans still running`
+            : `Total instalments across ${fmt.int(t.count)} active facilities`}</div>
         </div>
         <div class="kpi is-accent">
           <div class="label">Still owed</div>
-          <div class="value"><span class="cur">${cur}</span>${fmt.compact(data.totals.remaining)}</div>
+          <div class="value"><span class="cur">${cur}</span>${fmt.compact(t.remaining)}</div>
           <div class="foot">Everything not yet paid</div>
         </div>
-        <div class="kpi is-warn">
-          <div class="label">LC outstanding</div>
-          <div class="value"><span class="cur">${cur}</span>${fmt.compact(data.totals.lc)}</div>
-          <div class="foot">Letters of credit and trust receipts</div>
-        </div>
+        ${emiOnly ? `
+          <a class="kpi is-primary" href="#/monthly?month=${esc(thisMonth)}">
+            <div class="label">Due this month</div>
+            <div class="value"><span class="cur">${cur}</span>${fmt.compact(t.due_this_month)}</div>
+            <div class="foot">Instalments falling in ${esc(fmt.month(thisMonth))}, not yet paid</div>
+          </a>
+          <div class="kpi ${t.overdue_count ? 'is-danger' : 'is-ok'}">
+            <div class="label">Missed</div>
+            <div class="value"><span class="cur">${cur}</span>${fmt.compact(t.overdue_amount)}</div>
+            <div class="foot">${fmt.int(t.overdue_count)} instalment(s) past their date and not marked paid</div>
+          </div>`
+        : `
+          <div class="kpi is-warn">
+            <div class="label">LC outstanding</div>
+            <div class="value"><span class="cur">${cur}</span>${fmt.compact(t.lc)}</div>
+            <div class="foot">Letters of credit and trust receipts</div>
+          </div>`}
       </div>`;
 
     box.innerHTML = C.table(data.rows, [
-      { label: 'Type', render: (r) => `<b>${esc(r.type_label)}</b><br><span class="mini-note">${esc(r.company_code)}</span>` },
-      { label: 'Vehicle / reference', render: (r) =>
+      { label: 'Type', hidePhone: emiOnly, render: (r) => `<b>${esc(r.type_label)}</b><br><span class="mini-note">${esc(r.company_code)}</span>` },
+      { label: emiOnly ? 'Vehicle' : 'Vehicle / reference', render: (r) =>
           `${r.vehicle_no ? `<b>${esc(r.vehicle_no)}</b><br>` : ''}
-           <span class="mini-note">${esc(r.reference || r.description || '-')}</span>` },
-      { label: 'Bank', render: (r) => esc(r.bank_name) },
+           <span class="mini-note">${esc(r.description || r.reference || '-')}</span>` },
+      ...(emiOnly ? [{ label: 'Loan', mono: true, hidePhone: true, render: (r) => esc(r.reference || '-') }] : []),
+      { label: 'Bank', hidePhone: true, render: (r) => esc(r.bank_name) },
       { label: 'Monthly', num: true, render: (r) =>
           r.is_instalment ? `<b>${fmt.money(r.emi_amount)}</b>` : '<span class="mini-note">one payment</span>' },
       { label: 'Schedule', render: (r) => r.is_instalment
@@ -344,8 +397,11 @@
         ? 'Add a vehicle loan with its monthly instalment, and it shows up in the monthly payments view.'
         : '',
       rowClass: (r) => r.status !== 'ACTIVE' ? 'row-muted' : (r.overdue_instalments ? 'row-overdue' : ''),
-      footer: ['<b>Totals</b>', '', '', fmt.money(data.totals.monthly), '',
-               fmt.money(data.totals.remaining), '', '', '']
+      footer: emiOnly
+        ? ['<b>Totals</b>', '', '', '', `<b>${fmt.money(t.monthly)}</b>`, '',
+           `<b>${fmt.money(t.remaining)}</b>`, '', '', '']
+        : ['<b>Totals</b>', '', '', fmt.money(t.monthly), '',
+           fmt.money(t.remaining), '', '', '']
     });
 
     box.querySelectorAll('[data-act]').forEach((btn) => {
@@ -356,8 +412,10 @@
     });
   }
 
-  function facilityForm(row, after) {
+  function facilityForm(row, after, prefill) {
     const isEdit = !!row;
+    // Opened from Bank EMI, so it starts as a loan rather than a letter of credit.
+    const startType = row ? row.type : ((prefill && prefill.type) || 'VEHICLE_LOAN');
     const companyId = row ? row.company_id : (C.State.companyId || (C.State.companies[0] || {}).id);
 
     const modal = Modal.open({
@@ -370,7 +428,7 @@
             { name: 'company_id', label: 'Company', type: 'select', required: true,
               options: C.opt.companies(false), value: companyId },
             { name: 'type', label: 'Type', type: 'select', required: true,
-              value: row ? row.type : 'VEHICLE_LOAN',
+              value: startType,
               options: [
                 { value: 'VEHICLE_LOAN', label: 'Vehicle loan' },
                 { value: 'EQUIPMENT_LOAN', label: 'Equipment loan' },
@@ -551,5 +609,5 @@
     }
   }
 
-  window.Monthly = { renderMonthly, renderFacilities };
+  window.Monthly = { renderMonthly, renderFacilities, renderEmi };
 })();
