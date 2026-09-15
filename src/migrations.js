@@ -108,6 +108,23 @@ const USERNAMES = {
   'accountant2@ararinfra.com': 'accountant2'
 };
 
+// The group traded under six licences when the app was first set up, but only
+// ARAR INFRA CONTRACTING is used. The other five were never more than seeded
+// rows, so they are cleared away - but only where that is still true, which is
+// why every one of them is checked before anything is deleted.
+const RETIRED_COMPANIES = [
+  ['AIT', 'ARAR INFRA TRADING'],
+  ['AIE', 'ARAR INFRA ELECTROMECHANICAL'],
+  ['AIB', 'ARAR INFRA BUILDING MATERIALS'],
+  ['AIS', 'ARAR INFRA SERVICES'],
+  ['AIP', 'ARAR INFRA PROJECTS']
+];
+
+const COMPANY_TABLES = [
+  'purchase_invoices', 'payments', 'sales_invoices', 'receipts',
+  'petty_cash_requests', 'bank_facilities', 'facility_dues', 'employees'
+];
+
 const MIGRATIONS = [
   {
     id: '2026-09-15-usernames',
@@ -142,6 +159,46 @@ const MIGRATIONS = [
       if (needsIt('receipts')) {
         rebuildWithNewCheck(db, 'receipts', RECEIPTS_TABLE, []);
       }
+    }
+  },
+  {
+    id: '2026-09-15-single-company',
+    description: 'Remove the five seeded companies the group never traded through',
+    up(db) {
+      const exists = (table) => !!db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(table);
+      const tables = COMPANY_TABLES.filter(exists);
+
+      RETIRED_COMPANIES.forEach(([code, name]) => {
+        const company = db
+          .prepare('SELECT id, name FROM companies WHERE code = ?')
+          .get(code);
+        // Gone already, or renamed into something the group does use.
+        if (!company || company.name !== name) return;
+
+        // Anything entered against it means somebody has started using it.
+        const used = tables.some((t) =>
+          db.prepare(`SELECT COUNT(*) c FROM ${t} WHERE company_id = ?`).get(company.id).c > 0
+        );
+        if (used) return;
+
+        const bankIds = db
+          .prepare('SELECT id FROM bank_accounts WHERE company_id = ?')
+          .all(company.id)
+          .map((r) => r.id);
+        if (bankIds.length) {
+          const list = bankIds.map(() => '?').join(',');
+          const moved =
+            db.prepare(`SELECT COUNT(*) c FROM payments WHERE from_bank_account_id IN (${list})`).get(...bankIds).c +
+            db.prepare(`SELECT COUNT(*) c FROM receipts WHERE to_bank_account_id IN (${list})`).get(...bankIds).c;
+          if (moved) return;
+        }
+
+        db.prepare('DELETE FROM bank_accounts WHERE company_id = ?').run(company.id);
+        db.prepare('DELETE FROM user_companies WHERE company_id = ?').run(company.id);
+        db.prepare('DELETE FROM companies WHERE id = ?').run(company.id);
+      });
     }
   }
 ];

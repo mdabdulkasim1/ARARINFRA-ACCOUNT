@@ -1,6 +1,6 @@
 # ARAR INFRA &middot; Accounts
 
-An internal cash-out control system for the six companies of the ARAR INFRA group.
+An internal cash-out control system for the ARAR INFRA group.
 
 It answers the questions the owner actually asks:
 
@@ -46,7 +46,7 @@ Requires [Node.js](https://nodejs.org) 18 or newer.
 ```bash
 npm install                # install dependencies
 cp .env.example .env       # then open .env and set JWT_SECRET
-npm run seed               # create the six companies, four users and the categories
+npm run seed               # create the company, four users and the categories
 npm start                  # http://localhost:3000
 ```
 
@@ -83,8 +83,9 @@ and so on, or edited under Masters &rarr; Users.
 
 ### First things to set up
 
-1. **Masters &rarr; Companies** - rename the six companies. The short code appears in
-   every payment and petty cash number, so keep it to three or four letters.
+1. **Masters &rarr; Companies** - check the company name, and add another if the group
+   takes a second licence. The short code appears in every payment and petty cash
+   number, so keep it to three or four letters.
 2. **Masters &rarr; Our bank accounts** - add the accounts money goes out from. These
    become the banks your cheques are drawn on.
 3. **Masters &rarr; Suppliers** - name, their bank (used as the default for transfers)
@@ -228,7 +229,7 @@ The sidebar shows a count of requests waiting on you.
 | **Income** | Customer invoices and money received |
 | **Supplier ageing** | Each supplier split into not due / 1-30 / 31-60 / 61-90 / 90+ days late |
 | **Supplier x month** | What each supplier is owed, placed in the month the cash falls due |
-| **Group summary** | All six companies side by side, with year to date figures |
+| **Group summary** | Every company side by side, with year to date figures |
 | **Where money went** | The payment register for a period, broken down by mode |
 | **Petty cash by staff** | Who drew how much, on what, and over which months |
 | **Audit trail** | Every entry, edit, approval and deletion, with who did it |

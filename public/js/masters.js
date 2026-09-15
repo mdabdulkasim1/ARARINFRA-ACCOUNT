@@ -393,12 +393,32 @@
       { label: 'TRN', render: (r) => esc(r.trn || '-') },
       { label: 'Currency', render: (r) => esc(r.currency) },
       { label: 'Active', render: (r) => r.active ? '<span class="badge green">Yes</span>' : '<span class="badge grey">No</span>' },
-      { label: '', render: (r) => C.can('company.edit') ? `<button class="btn small" data-id="${r.id}">Edit</button>` : '' }
+      { label: '', render: (r) => C.can('company.edit')
+          ? `<button class="btn small" data-id="${r.id}">Edit</button>` +
+            (rows.length > 1 ? ` <button class="btn small danger" data-del="${r.id}">Remove</button>` : '')
+          : '' }
     ], { empty: 'No companies yet', emptyIcon: '&#127970;', rowClass: (r) => r.active ? '' : 'row-muted' });
 
     wireAdd(body, () => companyForm(null, refresh));
     body.querySelectorAll('#tbl [data-id]').forEach((b) => {
       b.onclick = () => companyForm(rows.find((r) => r.id === Number(b.dataset.id)), refresh);
+    });
+    body.querySelectorAll('#tbl [data-del]').forEach((b) => {
+      b.onclick = async () => {
+        const row = rows.find((r) => r.id === Number(b.dataset.del));
+        const ok = await Modal.confirm({
+          title: `Remove ${row.name}?`,
+          message: 'This only works while the company is empty. If anything has been ' +
+                   'entered against it, nothing is removed and you will be told what is ' +
+                   'there - set it to Inactive instead.',
+          confirmText: 'Remove', danger: true
+        });
+        if (!ok) return;
+        await API.del(`/api/companies/${row.id}`);
+        await window.App.reloadLookups();
+        toast(`${row.name} removed`, 'ok');
+        refresh();
+      };
     });
   }
 
