@@ -242,6 +242,7 @@
           <dt>Role</dt><dd>${esc(me.role_label)}</dd>
           <dt>Companies</dt><dd>${esc(C.State.companies.map((c) => c.code).join(', '))}</dd>
         </dl>
+        ${C.can('settings.edit') ? '<div id="storage-panel" style="margin-top:14px"></div>' : ''}
         <div class="btn-row" style="margin-top:16px">
           <button class="btn" data-act="password">Change password</button>
           ${C.can('settings.edit') ? '<button class="btn" data-act="backup">Download backup</button>' : ''}
@@ -254,6 +255,10 @@
       footer: null
     });
     modal.querySelector('[data-act="password"]').onclick = () => { Modal.close(); changePasswordForm(false); };
+
+    // Whether the data survives a restart is the thing an owner most needs to be
+    // able to check, and it should not mean reading deploy logs.
+    if (C.can('settings.edit')) loadStoragePanel(modal);
 
     const restoreBtn = modal.querySelector('[data-act="restore"]');
     if (restoreBtn) restoreBtn.onclick = () => { Modal.close(); restoreForm(); };
@@ -274,6 +279,37 @@
       showLogin('You have signed out.');
     };
   };
+
+  async function loadStoragePanel(modal) {
+    const box = modal.querySelector('#storage-panel');
+    if (!box) return;
+    box.innerHTML = '<div class="mini-note">Checking where the data is kept&hellip;</div>';
+    try {
+      const s = await API.get('/api/admin/system');
+      const mb = s.database_size_bytes ? (s.database_size_bytes / 1048576).toFixed(1) : null;
+      box.innerHTML = `
+        <div class="alert ${s.storage_is_persistent ? 'ok' : 'error'}">
+          <b>${s.storage_is_persistent
+                ? 'Your data is kept on storage that survives a restart.'
+                : 'Warning: this copy has no permanent storage attached.'}</b>
+          ${s.storage_is_persistent
+            ? ''
+            : '<br>Everything entered will be lost on the next deploy. Attach a volume before entering real data.'}
+        </div>
+        <dl class="kv">
+          <dt>Kept in</dt><dd class="mono" style="font-size:12px">${esc(s.data_dir)}</dd>
+          ${mb ? `<dt>Database size</dt><dd>${mb} MB</dd>` : ''}
+          <dt>Suppliers</dt><dd>${fmt.int(s.counts.suppliers)}</dd>
+          <dt>Supplier invoices</dt><dd><b>${fmt.int(s.counts.purchase_invoices)}</b></dd>
+          <dt>Payments</dt><dd>${fmt.int(s.counts.payments)}</dd>
+          <dt>Sign in secret</dt><dd>${s.session_secret_is_set
+            ? 'set in the environment'
+            : 'generated and stored alongside the data'}</dd>
+        </dl>`;
+    } catch (err) {
+      box.innerHTML = `<div class="mini-note">Could not read the storage details: ${esc(err.message)}</div>`;
+    }
+  }
 
   /** Replace everything in the app with the contents of a backup file. */
   function restoreForm() {

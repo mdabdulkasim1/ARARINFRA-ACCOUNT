@@ -188,8 +188,14 @@ router.get('/system', requirePermission('settings.edit'), (req, res) => {
   ['companies', 'users', 'suppliers', 'purchase_invoices', 'payments', 'petty_cash_requests']
     .forEach((t) => { counts[t] = db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c; });
 
+  // In WAL mode a good part of the data can be sitting in the -wal file, so the
+  // main file on its own understates how much is being kept.
   let dbSize = null;
-  try { dbSize = fs.statSync(config.dbFile).size; } catch { /* not readable, not important */ }
+  try {
+    dbSize = ['', '-wal', '-shm'].reduce((total, suffix) => {
+      try { return total + fs.statSync(config.dbFile + suffix).size; } catch { return total; }
+    }, 0);
+  } catch { /* not readable, not important */ }
 
   res.json({
     hosted: config.onRailway,
