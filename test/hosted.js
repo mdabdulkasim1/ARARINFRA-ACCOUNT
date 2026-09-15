@@ -30,6 +30,8 @@ const { db } = require('../src/db');
 const config = require('../src/config');
 const { bootstrap, generatePassword } = require('../src/bootstrap');
 const { checkPassword } = require('../src/auth');
+const { runMigrations } = require('../src/migrations');
+const Database = require('better-sqlite3');
 
 let passed = 0;
 const failures = [];
@@ -79,9 +81,53 @@ async function main() {
   await check('a fresh deployment creates the companies and the staff accounts', () => {
     result = bootstrap();
     assert.strictEqual(result.created, true);
-    assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM companies').get().c, 6);
+    // The group trades under one licence; more are added from Masters.
+    assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM companies').get().c, 1);
+    assert.strictEqual(
+      db.prepare('SELECT name FROM companies').get().name, 'ARAR INFRA CONTRACTING'
+    );
     assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM users').get().c, 4);
     assert.ok(db.prepare('SELECT COUNT(*) c FROM categories').get().c > 20);
+  });
+
+  await check('an older database loses the five companies it never traded through', () => {
+    // A database from before the group settled on one licence: six companies,
+    // each with the bank accounts the first run created.
+    const older = new Database(path.join(tmpDir, 'older.db'));
+    older.exec(fs.readFileSync(path.join(__dirname, '..', 'src', 'schema.sql'), 'utf8'));
+    [['AIC', 'ARAR INFRA CONTRACTING'], ['AIT', 'ARAR INFRA TRADING'],
+     ['AIE', 'ARAR INFRA ELECTROMECHANICAL'], ['AIB', 'ARAR INFRA BUILDING MATERIALS'],
+     ['AIS', 'ARAR INFRA SERVICES'], ['AIP', 'ARAR INFRA PROJECTS']].forEach(([code, name]) => {
+      older.prepare('INSERT INTO companies (code, name, currency) VALUES (?, ?, ?)').run(code, name, 'AED');
+    });
+    older.prepare(
+      "INSERT INTO bank_accounts (company_id, bank_name, currency) SELECT id, 'ADCB', 'AED' FROM companies"
+    ).run();
+
+    runMigrations(older);
+
+    const left = older.prepare('SELECT code FROM companies ORDER BY code').all().map((r) => r.code);
+    assert.deepStrictEqual(left, ['AIC']);
+    assert.strictEqual(older.prepare('SELECT COUNT(*) c FROM bank_accounts').get().c, 1);
+    older.close();
+  });
+
+  await check('a company somebody has entered invoices against is left alone', () => {
+    const older = new Database(path.join(tmpDir, 'older-in-use.db'));
+    older.exec(fs.readFileSync(path.join(__dirname, '..', 'src', 'schema.sql'), 'utf8'));
+    older.prepare("INSERT INTO companies (code, name, currency) VALUES ('AIC', 'ARAR INFRA CONTRACTING', 'AED')").run();
+    older.prepare("INSERT INTO companies (code, name, currency) VALUES ('AIT', 'ARAR INFRA TRADING', 'AED')").run();
+    older.prepare("INSERT INTO suppliers (code, name) VALUES ('S1', 'A Supplier')").run();
+    older.prepare(
+      `INSERT INTO purchase_invoices (company_id, supplier_id, invoice_no, invoice_date, total_amount)
+       VALUES (2, 1, 'INV-1', '2026-01-01', 1000)`
+    ).run();
+
+    runMigrations(older);
+
+    const left = older.prepare('SELECT code FROM companies ORDER BY code').all().map((r) => r.code);
+    assert.deepStrictEqual(left, ['AIC', 'AIT']);
+    older.close();
   });
 
   await check('the owner account is reachable as "admin"', () => {
@@ -128,9 +174,10 @@ async function main() {
   });
 
   await check('every account can reach every company', () => {
+    const companies = db.prepare('SELECT COUNT(*) c FROM companies').get().c;
     const rows = db.prepare('SELECT user_id, COUNT(*) c FROM user_companies GROUP BY user_id').all();
     assert.strictEqual(rows.length, 4);
-    rows.forEach((r) => assert.strictEqual(r.c, 6));
+    rows.forEach((r) => assert.strictEqual(r.c, companies));
   });
 
   await check('the starter passwords from the README are never used on a deployment', () => {
@@ -429,7 +476,7 @@ async function main() {
     const r = await owner('GET', '/api/admin/system');
     assert.strictEqual(r.status, 200);
     assert.strictEqual(typeof r.data.storage_is_persistent, 'boolean');
-    assert.strictEqual(r.data.counts.companies, 6);
+    assert.strictEqual(r.data.counts.companies, 1);
   });
 
   server.close();

@@ -3,7 +3,7 @@
 /**
  * First-run setup.
  *
- *   npm run seed           create the six companies, the four users and the categories
+ *   npm run seed           create the company, the four users and the categories
  *   npm run seed -- --demo also load a few weeks of sample invoices, cheques and
  *                          petty cash so the dashboard has something to show
  *   npm run reset          wipe everything and start again  (asks for --force in a live db)
@@ -51,15 +51,10 @@ const TERMS = Number(process.env.DEFAULT_PAYMENT_TERMS_DAYS || 90);
 
 // ------------------------------------------------------------------ companies
 
-// Rename these from Masters > Companies once you are in - the codes appear in
-// every document number, so pick short ones.
+// Rename this from Masters > Companies once you are in - the code appears in
+// every document number, so keep it short. Add more there if the group grows.
 const COMPANIES = [
-  { code: 'AIC', name: 'ARAR INFRA CONTRACTING' },
-  { code: 'AIT', name: 'ARAR INFRA TRADING' },
-  { code: 'AIE', name: 'ARAR INFRA ELECTROMECHANICAL' },
-  { code: 'AIB', name: 'ARAR INFRA BUILDING MATERIALS' },
-  { code: 'AIS', name: 'ARAR INFRA SERVICES' },
-  { code: 'AIP', name: 'ARAR INFRA PROJECTS' }
+  { code: 'AIC', name: 'ARAR INFRA CONTRACTING' }
 ];
 
 const insCompany = db.prepare(

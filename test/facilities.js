@@ -375,6 +375,70 @@ async function main() {
     assert.strictEqual(r.status, 403);
   });
 
+  // ---------------------------------------------------------------- companies
+
+  let spareCompanyId;
+  await check('a second company can be added and then removed again while it is empty', async () => {
+    const made = await owner('POST', '/api/companies', { code: 'SPR', name: 'Spare Company' });
+    assert.strictEqual(made.status, 201);
+    spareCompanyId = made.data.id;
+
+    const gone = await owner('DELETE', `/api/companies/${spareCompanyId}`);
+    assert.strictEqual(gone.status, 200);
+    assert.strictEqual(
+      db.prepare('SELECT COUNT(*) c FROM companies WHERE id = ?').get(spareCompanyId).c, 0
+    );
+  });
+
+  await check('removing a company takes its own bank accounts with it', async () => {
+    const made = await owner('POST', '/api/companies', { code: 'SP2', name: 'Spare Two' });
+    const id = made.data.id;
+    db.prepare(
+      "INSERT INTO bank_accounts (company_id, bank_name, account_name, currency) VALUES (?, 'ADCB', 'Spare Two', 'AED')"
+    ).run(id);
+
+    const gone = await owner('DELETE', `/api/companies/${id}`);
+    assert.strictEqual(gone.status, 200);
+    assert.strictEqual(
+      db.prepare('SELECT COUNT(*) c FROM bank_accounts WHERE company_id = ?').get(id).c, 0
+    );
+  });
+
+  await check('a company that has been traded through is not removed', async () => {
+    const made = await owner('POST', '/api/companies', { code: 'SP3', name: 'Spare Three' });
+    const spare = made.data.id;
+
+    // Everything so far was entered against company 1, so it cannot go.
+    const r = await owner('DELETE', '/api/companies/1');
+    assert.strictEqual(r.status, 400);
+    assert.match(r.data.error, /still holds/i);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM companies WHERE id = 1').get().c, 1);
+
+    const cleared = await owner('DELETE', `/api/companies/${spare}`);
+    assert.strictEqual(cleared.status, 200, JSON.stringify(cleared.data));
+  });
+
+  await check('the last company standing cannot be removed', async () => {
+    // Clear out the spare companies the earlier checks left behind, so only the
+    // one everything was entered against is left.
+    const spares = db.prepare('SELECT id FROM companies WHERE id <> 1').all();
+    for (const c of spares) {
+      const gone = await owner('DELETE', `/api/companies/${c.id}`);
+      assert.strictEqual(gone.status, 200, JSON.stringify(gone.data));
+    }
+    assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM companies').get().c, 1);
+    const r = await owner('DELETE', '/api/companies/1');
+    assert.strictEqual(r.status, 400);
+    assert.match(r.data.error, /only company/i);
+  });
+
+  await check('an accountant cannot remove a company', async () => {
+    const made = await owner('POST', '/api/companies', { code: 'SP4', name: 'Spare Four' });
+    const r = await acc('DELETE', `/api/companies/${made.data.id}`);
+    assert.strictEqual(r.status, 403);
+    await owner('DELETE', `/api/companies/${made.data.id}`);
+  });
+
   server.close();
 
   console.log('');

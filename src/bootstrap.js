@@ -19,13 +19,10 @@ const { db } = require('./db');
 const { hashPassword, checkPassword } = require('./auth');
 const config = require('./config');
 
+// The group trades under one licence. More can be added from Masters at any
+// time; nothing in the app assumes there is only ever one.
 const COMPANIES = [
-  { code: 'AIC', name: 'ARAR INFRA CONTRACTING' },
-  { code: 'AIT', name: 'ARAR INFRA TRADING' },
-  { code: 'AIE', name: 'ARAR INFRA ELECTROMECHANICAL' },
-  { code: 'AIB', name: 'ARAR INFRA BUILDING MATERIALS' },
-  { code: 'AIS', name: 'ARAR INFRA SERVICES' },
-  { code: 'AIP', name: 'ARAR INFRA PROJECTS' }
+  { code: 'AIC', name: 'ARAR INFRA CONTRACTING' }
 ];
 
 // A username is not a secret, so it lives here. Passwords never do - they come

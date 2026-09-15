@@ -66,6 +66,99 @@ router.put('/companies/:id', requirePermission('company.edit'), (req, res, next)
   }
 });
 
+/**
+ * What is stopping this company from being removed, if anything.
+ *
+ * A company is only ever removed while it is empty - deleting one that has been
+ * traded through would take its invoices and payments with it, and the figures
+ * the owner watches would quietly change. So everything that points at it is
+ * counted first and the answer is shown before anything happens.
+ */
+const COMPANY_HOLDINGS = [
+  ['purchase_invoices', 'supplier invoice'],
+  ['payments',          'payment'],
+  ['sales_invoices',    'sales invoice'],
+  ['receipts',          'receipt'],
+  ['petty_cash_requests', 'petty cash request'],
+  ['bank_facilities',   'loan or facility'],
+  ['facility_dues',     'instalment'],
+  ['employees',         'employee']
+];
+
+function companyHoldings(companyId) {
+  return COMPANY_HOLDINGS
+    .map(([table, label]) => ({
+      label,
+      count: db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE company_id = ?`).get(companyId).c
+    }))
+    .filter((h) => h.count > 0);
+}
+
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * Remove a company outright.
+ *
+ * Its own bank accounts and the staff access rows go with it, because those are
+ * only ever set up for the company itself. Anything else is a refusal with the
+ * reason spelled out - deactivating from the edit screen is the way to retire a
+ * company that has been used.
+ */
+router.delete('/companies/:id', requirePermission('company.edit'), (req, res, next) => {
+  try {
+    const existing = db.prepare('SELECT * FROM companies WHERE id = ?').get(req.params.id);
+    if (!existing) throw notFound('Company not found');
+
+    if (db.prepare('SELECT COUNT(*) c FROM companies').get().c <= 1) {
+      throw badRequest('This is the only company left, so it cannot be removed.');
+    }
+
+    const holdings = companyHoldings(existing.id);
+    if (holdings.length) {
+      throw badRequest(
+        `${existing.name} still holds ${holdings.map((h) => plural(h.count, h.label)).join(', ')}. ` +
+        'Untick "Active" on the company instead - that hides it everywhere without losing anything.'
+      );
+    }
+
+    // A bank account belongs to its company, but a transfer may have been paid
+    // out of it before the company was emptied, and those rows are kept.
+    const bankIds = db
+      .prepare('SELECT id FROM bank_accounts WHERE company_id = ?')
+      .all(existing.id)
+      .map((r) => r.id);
+    if (bankIds.length) {
+      const list = bankIds.map(() => '?').join(',');
+      const used =
+        db.prepare(`SELECT COUNT(*) c FROM payments WHERE from_bank_account_id IN (${list})`).get(...bankIds).c +
+        db.prepare(`SELECT COUNT(*) c FROM receipts WHERE to_bank_account_id IN (${list})`).get(...bankIds).c;
+      if (used) {
+        throw badRequest(
+          `${existing.name} has bank accounts that money has moved through. ` +
+          'Untick "Active" on the company instead.'
+        );
+      }
+    }
+
+    db.transaction(() => {
+      db.prepare('DELETE FROM bank_accounts WHERE company_id = ?').run(existing.id);
+      db.prepare('DELETE FROM user_companies WHERE company_id = ?').run(existing.id);
+      db.prepare('DELETE FROM companies WHERE id = ?').run(existing.id);
+    })();
+
+    audit(req, {
+      action: 'DELETE', entity: 'company', entity_id: existing.id,
+      summary: `Removed company ${existing.name}`,
+      details: { code: existing.code, bank_accounts: bankIds.length }
+    });
+    res.json({ ok: true, removed: existing.name });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ------------------------------------------------------------------ suppliers
 
 router.get('/suppliers', (req, res) => {
