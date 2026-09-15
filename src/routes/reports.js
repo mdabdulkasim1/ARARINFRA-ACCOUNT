@@ -223,6 +223,23 @@ router.get('/dashboard', (req, res, next) => {
       .map((s) => ({ ...s, net_payable: money(s.outstanding - s.pdc) }))
       .sort((a, b) => b.outstanding - a.outstanding);
 
+    // The cheque load month by month, on the date written on the cheque. This is
+    // the same money as the PDC issued figure above, split by when it lands, so
+    // the months always add back up to it.
+    const pdcByMonth = db
+      .prepare(
+        `SELECT substr(p.cheque_date, 1, 7) AS month,
+                COUNT(*) AS count,
+                ROUND(IFNULL(SUM(p.amount), 0), 2) AS amount
+           FROM payments p
+          WHERE p.company_id IN (${inList(ids)}) AND ${SQL_PDC_OUTSTANDING}
+            AND p.cheque_date IS NOT NULL
+          GROUP BY month
+          ORDER BY month`
+      )
+      .all(...ids)
+      .map((r) => ({ ...r, amount: money(r.amount), is_past: r.month < asOf.slice(0, 7) }));
+
     // Cheques coming up, so nothing is presented against an empty account.
     const upcomingPdc = db
       .prepare(
@@ -241,6 +258,7 @@ router.get('/dashboard', (req, res, next) => {
       top_suppliers: bySupplier.slice(0, 10),
       overdue_invoices: invoices.filter((i) => i.is_overdue).slice(0, 25),
       upcoming_pdc: upcomingPdc,
+      pdc_by_month: pdcByMonth,
       monthly_cash_out: monthlyCashOut(ids, 6),
       monthly_income: monthlyIncome(ids, 6)
     });

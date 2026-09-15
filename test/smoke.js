@@ -522,6 +522,28 @@ async function main() {
     assert.ok(r.data.by_bank.some((b) => b.bank === 'Mashreq Bank'));
   });
 
+  await check('the dashboard splits the cheque load by the month on the cheque', async () => {
+    const r = await owner('GET', '/api/reports/dashboard');
+    const months = r.data.pdc_by_month;
+    assert.ok(months.length >= 1, 'the cheques entered above are in there');
+
+    // Same money as the PDC issued figure, only split by when it lands - so the
+    // months have to add back up to it, or the dashboard contradicts itself.
+    const amount = months.reduce((t, m) => money(t + m.amount), 0);
+    const count = months.reduce((t, m) => t + m.count, 0);
+    assert.strictEqual(amount, r.data.kpi.pdc_outstanding_total, 'months add up to PDC issued');
+    assert.strictEqual(count, r.data.kpi.pdc_outstanding_count, 'cheque counts add up');
+
+    // Oldest first, one row per month, and each month knows if it is already past.
+    const keys = months.map((m) => m.month);
+    assert.deepStrictEqual(keys, [...keys].sort(), 'months are in order');
+    assert.strictEqual(new Set(keys).size, keys.length, 'one row per month');
+    months.forEach((m) => {
+      assert.match(m.month, /^\d{4}-\d{2}$/);
+      assert.strictEqual(m.is_past, m.month < today().slice(0, 7));
+    });
+  });
+
   await check('the supplier statement reconciles', async () => {
     const r = await owner('GET', '/api/reports/supplier-statement/1');
     assert.strictEqual(r.status, 200);
