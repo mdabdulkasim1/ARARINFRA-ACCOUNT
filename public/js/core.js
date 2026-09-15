@@ -447,15 +447,20 @@
     // otherwise squeezes the named column down to fit the numeric ones.
     const widthStyle = (c) => (c.width ? `style="min-width:${c.width}"` : '');
 
+    // A column marked hidePhone drops out on a narrow screen, so the figure that
+    // matters is not pushed off the side by the ones that only add context.
+    const cellClass = (c, extra) =>
+      [c.num ? 'num' : '', extra || '', c.hidePhone ? 'hide-phone' : ''].filter(Boolean).join(' ');
+
     const head = columns.map((c) =>
-      `<th class="${c.num ? 'num' : ''}" ${widthStyle(c)}>${esc(c.label)}</th>`
+      `<th class="${cellClass(c)}" ${widthStyle(c)}>${esc(c.label)}</th>`
     ).join('');
 
     const body = rows.map((row, i) => {
       const cls = opts.rowClass ? opts.rowClass(row) : '';
       const cells = columns.map((c) => {
         const v = c.render ? c.render(row, i) : esc(row[c.key]);
-        return `<td class="${c.num ? 'num' : ''} ${c.mono ? 'mono' : ''}" ${widthStyle(c)}>${v === null || v === undefined ? '' : v}</td>`;
+        return `<td class="${cellClass(c, c.mono ? 'mono' : '')}" ${widthStyle(c)}>${v === null || v === undefined ? '' : v}</td>`;
       }).join('');
       return `<tr class="${cls}" ${opts.rowAttrs ? opts.rowAttrs(row) : ''}>${cells}</tr>`;
     }).join('');
@@ -464,7 +469,7 @@
     const foot = opts.footer
       ? `<tfoot><tr>${columns.map((c, idx) => {
           const v = Array.isArray(opts.footer) ? opts.footer[idx] : opts.footer[c.key];
-          return `<td class="${c.num ? 'num' : ''}">${v === undefined || v === null ? '' : v}</td>`;
+          return `<td class="${cellClass(c)}">${v === undefined || v === null ? '' : v}</td>`;
         }).join('')}</tr></tfoot>`
       : '';
 

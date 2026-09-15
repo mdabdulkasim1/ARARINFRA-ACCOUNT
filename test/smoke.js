@@ -477,6 +477,38 @@ async function main() {
     assert.strictEqual(money(total), r.data.totals.total);
   });
 
+  await check('each bucket says how many invoices are in it and since when', async () => {
+    // This is what the dashboard shows when a bar of the ageing chart is opened
+    // to see which suppliers are behind it.
+    const r = await owner('GET', '/api/reports/supplier-ageing');
+    const buckets = ['NOT_DUE', 'D1_30', 'D31_60', 'D61_90', 'D90_PLUS', 'NO_DUE_DATE'];
+
+    r.data.rows.forEach((row) => {
+      const counted = buckets.reduce((n, b) => n + row.counts[b], 0);
+      assert.strictEqual(counted, row.invoices, `${row.supplier_name} counts add up to its invoices`);
+
+      buckets.forEach((b) => {
+        // An empty bucket has no invoices and no date; a bucket with money in it
+        // has at least one invoice behind it.
+        if (row[b] > 0.005) assert.ok(row.counts[b] >= 1, `${row.supplier_name} ${b} has invoices`);
+        else assert.strictEqual(row.counts[b], 0, `${row.supplier_name} ${b} is empty`);
+        if (row.oldest[b]) assert.ok(row.counts[b] >= 1, `${row.supplier_name} ${b} date belongs to an invoice`);
+      });
+
+      // Nothing without a due date can carry one.
+      assert.strictEqual(row.oldest.NO_DUE_DATE, null);
+    });
+
+    // The amounts in one bucket are what the dashboard's bar for it shows.
+    const dash = await owner('GET', '/api/reports/dashboard');
+    dash.data.ageing.forEach((bar) => {
+      const amount = r.data.rows.reduce((t, row) => money(t + row[bar.bucket]), 0);
+      const count = r.data.rows.reduce((t, row) => t + row.counts[bar.bucket], 0);
+      assert.strictEqual(amount, bar.amount, `${bar.bucket} amount matches the chart`);
+      assert.strictEqual(count, bar.count, `${bar.bucket} count matches the chart`);
+    });
+  });
+
   await check('the PDC register lists cheques still to clear', async () => {
     const created = await acc1('POST', '/api/payments', {
       company_id: 1, supplier_id: 1, payment_date: today(), amount: 3000, mode: 'PDC',

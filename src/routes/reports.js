@@ -264,7 +264,13 @@ router.get('/supplier-ageing', (req, res, next) => {
         bySupplier[k] = {
           supplier_id: k, supplier_code: inv.supplier_code, supplier_name: inv.supplier_name,
           total: 0, pdc: 0, net_payable: 0, invoices: 0,
-          NOT_DUE: 0, D1_30: 0, D31_60: 0, D61_90: 0, D90_PLUS: 0, NO_DUE_DATE: 0
+          NOT_DUE: 0, D1_30: 0, D31_60: 0, D61_90: 0, D90_PLUS: 0, NO_DUE_DATE: 0,
+          // How many invoices sit in each bucket, so a bucket can be opened on
+          // its own and still say how many bills make up the figure.
+          counts: { NOT_DUE: 0, D1_30: 0, D31_60: 0, D61_90: 0, D90_PLUS: 0, NO_DUE_DATE: 0 },
+          // The date the bucket's earliest bill fell due, so a list of one bucket
+          // can show how long the worst of it has been waiting.
+          oldest: { NOT_DUE: null, D1_30: null, D31_60: null, D61_90: null, D90_PLUS: null, NO_DUE_DATE: null }
         };
       }
       const s = bySupplier[k];
@@ -273,6 +279,11 @@ router.get('/supplier-ageing', (req, res, next) => {
       s.net_payable = money(s.total - s.pdc);
       s.invoices += 1;
       s[inv.ageing_bucket] = money(s[inv.ageing_bucket] + inv.outstanding);
+      s.counts[inv.ageing_bucket] += 1;
+      const oldest = s.oldest[inv.ageing_bucket];
+      if (inv.due_date && (!oldest || inv.due_date < oldest)) {
+        s.oldest[inv.ageing_bucket] = inv.due_date;
+      }
     }
 
     const rows = Object.values(bySupplier).sort((a, b) => b.total - a.total);

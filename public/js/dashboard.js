@@ -189,6 +189,10 @@
     host.querySelectorAll('[data-pay]').forEach((btn) => {
       btn.onclick = () => window.Payables.openPaymentForInvoice(Number(btn.dataset.pay), () => render(host));
     });
+
+    host.querySelectorAll('[data-bucket]').forEach((bar) => {
+      bar.onclick = () => showBucket(bar.dataset.bucket, bar.dataset.label);
+    });
   }
 
   function kpi(o) {
@@ -218,14 +222,84 @@
     if (!buckets.some((b) => b.amount > 0)) {
       return '<div class="empty"><div class="big">&#128202;</div><div>Nothing is outstanding</div></div>';
     }
-    return `<div class="bars">${buckets.map((b) => `
-      <div class="bar-row">
+    // A bar with nothing in it has nobody to show, so only the ones carrying
+    // money become buttons.
+    return `<div class="bars">${buckets.map((b) => {
+      const inner = `
         <div>${esc(b.label)}<br><span class="cnt">${fmt.int(b.count)} invoice(s)</span></div>
         <div class="bar-track">
           <div class="bar-fill" style="width:${Math.max(1, (b.amount / max) * 100)}%;background:${BUCKET_COLOUR[b.bucket]}"></div>
         </div>
-        <div class="amt">${fmt.money(b.amount)}</div>
-      </div>`).join('')}</div>`;
+        <div class="amt">${fmt.money(b.amount)}</div>`;
+      return b.amount > 0
+        ? `<button type="button" class="bar-row is-clickable" data-bucket="${esc(b.bucket)}"
+                   data-label="${esc(b.label)}" title="See which suppliers make up this">${inner}</button>`
+        : `<div class="bar-row">${inner}</div>`;
+    }).join('')}</div>`;
+  }
+
+  /**
+   * Who is behind one bar of the ageing chart.
+   *
+   * The chart answers how much is late; the owner's next question is always who,
+   * so clicking a bar opens the suppliers that make it up, biggest first, with a
+   * way straight through to each one's statement.
+   */
+  async function showBucket(bucket, label) {
+    const qs = C.companyParam();
+    const data = await C.API.get(`/api/reports/supplier-ageing${qs ? `?${qs}` : ''}`);
+
+    const rows = data.rows
+      .filter((r) => r[bucket] > 0.005)
+      .map((r) => ({
+        supplier_id: r.supplier_id,
+        supplier_name: r.supplier_name,
+        supplier_code: r.supplier_code,
+        amount: r[bucket],
+        invoices: (r.counts && r.counts[bucket]) || 0,
+        oldest: (r.oldest && r.oldest[bucket]) || null,
+        total: r.total
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const total = rows.reduce((t, r) => t + r.amount, 0);
+    const invoices = rows.reduce((t, r) => t + r.invoices, 0);
+    const late = bucket !== 'NOT_DUE' && bucket !== 'NO_DUE_DATE';
+
+    C.Modal.open({
+      title: label,
+      subtitle: `${fmt.int(rows.length)} supplier(s) \u00b7 ${fmt.int(invoices)} invoice(s) ` +
+                `\u00b7 ${fmt.money(total)} ${C.State.currency} as at ${fmt.date(data.as_of)}`,
+      size: 'wide',
+      body: `<div class="tight">${C.table(rows, [
+        { label: 'Supplier', render: (r) =>
+            `<a href="#/supplier/${r.supplier_id}" data-close-modal><b>${esc(r.supplier_name)}</b></a>` +
+            ` <span class="mini-note">${esc(r.supplier_code || '')}</span>` },
+        { label: 'Invoices', num: true, render: (r) => fmt.int(r.invoices) },
+        { label: late ? 'Due since' : 'Due', hidePhone: true, render: (r) =>
+            r.oldest ? `<span class="nowrap">${fmt.date(r.oldest)}</span>` : '<span class="mini-note">-</span>' },
+        { label: 'In this bucket', num: true, render: (r) =>
+            `<b class="${late ? 'amount-danger' : ''}">${fmt.money(r.amount)}</b>` },
+        { label: 'Owed in total', num: true, hidePhone: true, render: (r) => fmt.money(r.total) }
+      ], {
+        empty: 'Nothing sits in this bucket',
+        footer: [
+          '<b>Total</b>',
+          fmt.int(invoices),
+          '',
+          `<b class="${late ? 'amount-danger' : ''}">${fmt.money(total)}</b>`,
+          ''
+        ]
+      })}</div>`,
+      footer: `<button class="btn" data-act="close">Close</button>
+               <a class="btn primary" href="#/ageing" data-close-modal>Full ageing report</a>`,
+      onMount(modal) {
+        modal.querySelector('[data-act="close"]').onclick = () => C.Modal.close();
+        modal.querySelectorAll('[data-close-modal]').forEach((a) => {
+          a.addEventListener('click', () => C.Modal.close());
+        });
+      }
+    });
   }
 
   function monthlyBars(cashOut, income) {
