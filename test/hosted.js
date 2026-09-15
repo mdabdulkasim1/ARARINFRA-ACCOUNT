@@ -477,6 +477,9 @@ async function main() {
     assert.strictEqual(r.status, 200);
     assert.strictEqual(typeof r.data.storage_is_persistent, 'boolean');
     assert.strictEqual(r.data.counts.companies, 1);
+    // The warning has to be able to name the fix, not just say something is wrong.
+    assert.strictEqual(r.data.suggested_mount_path, r.data.data_dir);
+    assert.strictEqual(typeof r.data.db_file_is_set, 'boolean');
   });
 
   server.close();

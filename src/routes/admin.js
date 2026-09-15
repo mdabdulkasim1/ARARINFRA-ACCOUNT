@@ -201,6 +201,11 @@ router.get('/system', requirePermission('settings.edit'), (req, res) => {
     hosted: config.onRailway,
     storage_is_persistent: config.storageIsPersistent,
     data_dir: config.dataDir,
+    // What to mount, and where, so the warning can name the fix rather than
+    // leaving whoever reads it to guess.
+    volume_mount_path: config.volume,
+    suggested_mount_path: config.dataDir,
+    db_file_is_set: !!process.env.DB_FILE,
     database_size_bytes: dbSize,
     session_secret_is_set: !!process.env.JWT_SECRET,
     counts
