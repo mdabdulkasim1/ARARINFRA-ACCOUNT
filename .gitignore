@@ -1,8 +1,10 @@
 node_modules/
-data/*.db
-data/*.db-shm
-data/*.db-wal
-data/backups/
+
+# The data directory holds the live database and the generated session secret.
+# Nothing in it belongs in the repository.
+data/*
+!data/.gitkeep
+
 .env
 *.log
 .DS_Store

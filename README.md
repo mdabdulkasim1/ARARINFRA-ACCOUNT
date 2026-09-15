@@ -126,8 +126,11 @@ Record a payment in whichever mode was used:
 | Mode | What is captured |
 | --- | --- |
 | **Cash** | Nothing further |
-| **Bank transfer** / **Online** | The supplier's bank name and account, our paying account, and the UTR |
-| **PDC** / **Cheque** | Cheque number, cheque date, and the bank it is drawn on |
+| **Bank transfer** / **Online** | The supplier's bank name and account, the UTR, and **which of our banks it came out of** |
+| **PDC** / **Cheque** | Cheque number, cheque date, and **which of our accounts it is drawn on** |
+
+The group runs several bank accounts, so naming ours is required on transfers and
+cheques - otherwise the cheque register cannot say what each bank is carrying.
 
 Then tick the invoices it settles. *Fill oldest first* spreads the amount across
 them automatically. Anything not applied stays on the supplier's account as an
@@ -136,6 +139,30 @@ advance, and the form tells you so before you save.
 A cheque then moves through its life in the **Cheque register**:
 issued &rarr; presented &rarr; cleared, or bounced, cancelled, replaced.
 Only *cleared* reduces the payable.
+
+### Bank facilities
+
+Vehicle loans, equipment loans and letters of credit are entered once, with the
+bank, the monthly instalment and the dates. The schedule of instalments is worked
+out from that, and each one can be marked paid as the bank takes it. A vehicle
+loan carries its plate number, so the cost can be traced back to the vehicle.
+
+An LC is a single amount on its maturity date rather than a monthly instalment.
+
+### What has to be paid this month
+
+One screen answers the question the owner actually asks. Pick a month and it adds
+up, for that month:
+
+- **PDC issued** - cheques dated in the month and not yet cleared
+- **STL settlement** - settlement cheques, counted separately from ordinary PDC
+- **Bank EMI** - instalments on the vehicle and equipment loans
+- **LC** - letters of credit maturing
+- **Supplier invoices** - bills reaching their due date
+- **Petty cash** - approved but not yet handed over
+
+Where a cheque already covers an invoice falling due in the same month, the total
+counts it once, not twice, and says so on screen.
 
 ### Petty cash
 
@@ -156,11 +183,13 @@ The sidebar shows a count of requests waiting on you.
 
 | Screen | What it is for |
 | --- | --- |
+| **What to pay** | Pick a month and see every commitment falling due in it: PDC, STL settlement, bank EMI, LC, supplier invoices and approved petty cash |
 | **Dashboard** | Payable, PDC issued, still to arrange, overdue, cheques coming up, and a company by company table |
 | **Supplier invoices** | Every bill, filtered by overdue, due soon, open or not submitted |
 | **Payments** | Every payment, plus the advances still sitting on account |
 | **Cheque register** | Cheques still to clear, by month and by bank, so the balance can be planned |
 | **Petty cash** | Raise, verify, approve, reject and pay out |
+| **Loans & LC** | Vehicle and equipment loans by monthly instalment, and letters of credit |
 | **Income** | Customer invoices and money received |
 | **Supplier ageing** | Each supplier split into not due / 1-30 / 31-60 / 61-90 / 90+ days late |
 | **Group summary** | All six companies side by side, with year to date figures |
@@ -173,6 +202,30 @@ Every list exports to CSV, and the reports print cleanly.
 Use the **company selector** in the top bar to look at one company or the whole group.
 
 ---
+
+## Bringing the old spreadsheet in
+
+The purchase log can be loaded straight into the app:
+
+```bash
+npm install --include=dev                       # the spreadsheet reader is dev-only
+npm run import -- PURCHASE_LOGS-2026.xlsx --dry-run          # see what it would do
+npm run import -- PURCHASE_LOGS-2026.xlsx --company AIC      # do it
+npm run import -- PURCHASE_LOGS-2026.xlsx --company AIC --cheques   # and the cheques
+```
+
+It reads the `Master_Combined` sheet (or `2026`): one row per supplier invoice,
+with the invoice date, the date it was submitted, the terms, the amounts and what
+has been paid. Suppliers and categories are created as it goes.
+
+Where the sheet shows an amount already paid, that is recorded as a single opening
+settlement against the invoice, so what is still outstanding in the app matches the
+sheet's BALANCE column exactly. Historic cheques are not matched to individual
+invoices - the sheet does not record which cheque paid which bill - so `--cheques`
+only brings in the ones that have not cleared, as a register.
+
+Running it twice is safe: an invoice already recorded for the same supplier is
+skipped rather than duplicated.
 
 ## Running it for real
 
@@ -197,6 +250,8 @@ The system is built to sit on the office network or behind the company VPN.
 | `GROUP_NAME` | ARAR INFRA GROUP | Shown on the group report |
 | `DEFAULT_CURRENCY` | AED | Currency used throughout |
 | `DEFAULT_PAYMENT_TERMS_DAYS` | 90 | Credit period for a new supplier |
+| `DATA_DIR` | ./data | Where the database and session secret live - point this at a mounted volume when hosting |
+| `OWNER_PASSWORD` etc. | *(none)* | Set a password from the host's variables; reapplied on every start, so remove it once people manage their own |
 
 ---
 
@@ -206,11 +261,20 @@ The system is built to sit on the office network or behind the company VPN.
 npm test
 ```
 
-43 end-to-end checks covering the rules that matter: terms counted from the
+76 end-to-end checks across three files. `test/smoke.js` covers the rules that
+matter: terms counted from the
 submitted date, overdue flagging, a cheque staying a commitment until it clears
 and going back onto the payable when it bounces, allocations never exceeding what
 an invoice owes, advances applied later, petty cash needing somebody other than
 the requester to approve, and each role being held to its permissions.
+
+`test/hosted.js` covers what changes once the app is hosted: first-run accounts,
+weak passwords never reaching a deployment, storage surviving a redeploy, the sign
+in throttle, and who may take a backup.
+
+`test/facilities.js` covers the monthly view: instalment schedules, an instalment
+dated the 31st landing on the last day of February, LCs falling due once, PDC and
+STL counted apart, and money covered by a cheque not being asked for twice.
 
 ---
 
@@ -227,12 +291,21 @@ src/
   auth.js        passwords, sessions, roles and permissions
   queries.js     the payable / PDC / ageing calculations
   util.js        dates, money, due dates, ageing buckets
+  config.js      where data lives, and the session secret
+  bootstrap.js   first boot on a hosted deployment
+  migrations.js  schema changes for databases made by an earlier version
+  ratelimit.js   the sign in throttle
+  import.js      loads the old purchase log spreadsheet
+  set-password.js the way back in when nobody can sign in
   seed.js        first run setup and the sample data
-  routes/        auth, masters, purchases, payments, sales, pettycash, reports
+  routes/        auth, masters, purchases, payments, sales, pettycash,
+                 facilities, reports, admin
 public/
   index.html     the single page
   css/app.css    one stylesheet
-  js/            core, dashboard, payables, petty, income, reports, masters, app
+  img/           drop logo.png here and it appears on sign in and the sidebar
+  js/            core, dashboard, payables, petty, monthly, income, reports,
+                 masters, app
 test/smoke.js    the end-to-end checks
 ```
 

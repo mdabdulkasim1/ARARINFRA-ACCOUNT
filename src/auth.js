@@ -75,6 +75,7 @@ const PERMISSIONS = {
     'sales.view', 'sales.create', 'sales.edit', 'sales.delete',
     'receipt.view', 'receipt.create', 'receipt.edit', 'receipt.delete',
     'petty.view', 'petty.create', 'petty.verify', 'petty.approve', 'petty.pay', 'petty.delete',
+    'facility.view', 'facility.edit', 'facility.pay', 'facility.delete',
     'master.view', 'master.edit',
     'company.view', 'company.edit',
     'user.view', 'user.edit',
@@ -88,6 +89,7 @@ const PERMISSIONS = {
     'sales.view', 'sales.create', 'sales.edit', 'sales.delete',
     'receipt.view', 'receipt.create', 'receipt.edit', 'receipt.delete',
     'petty.view', 'petty.create', 'petty.verify', 'petty.pay',
+    'facility.view', 'facility.edit', 'facility.pay', 'facility.delete',
     'master.view', 'master.edit',
     'company.view',
     'user.view',
@@ -100,6 +102,8 @@ const PERMISSIONS = {
     'sales.view', 'sales.create', 'sales.edit',
     'receipt.view', 'receipt.create', 'receipt.edit',
     'petty.view', 'petty.create',
+    // Accounts feed the monthly instalment figures; only finance marks them paid.
+    'facility.view', 'facility.edit',
     'master.view', 'master.edit',
     'company.view',
     'report.view'

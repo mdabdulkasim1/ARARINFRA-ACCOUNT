@@ -14,7 +14,9 @@ const router = express.Router();
 router.use(requireAuth);
 
 const MODES = ['CASH', 'BANK_TRANSFER', 'PDC', 'CHEQUE', 'ONLINE', 'OTHER'];
-const PDC_STATUSES = ['ISSUED', 'PRESENTED', 'CLEARED', 'BOUNCED', 'CANCELLED', 'REPLACED'];
+// SETTLED (the sheet's "STL") is money gone, like CLEARED, but tracked apart so
+// the monthly view can report settlement cheques on their own.
+const PDC_STATUSES = ['ISSUED', 'PRESENTED', 'CLEARED', 'SETTLED', 'BOUNCED', 'CANCELLED', 'REPLACED'];
 
 /**
  * List payments.
@@ -211,7 +213,7 @@ router.post('/:id/pdc-status', requirePermission('payment.pdcstatus'), (req, res
     if (!PDC_STATUSES.includes(status)) {
       throw badRequest(`Cheque status must be one of: ${PDC_STATUSES.join(', ')}`);
     }
-    const clearedDate = status === 'CLEARED'
+    const clearedDate = (status === 'CLEARED' || status === 'SETTLED')
       ? (toDate(req.body.cleared_date) || today())
       : null;
     const reason = text(req.body.reason);
@@ -337,6 +339,30 @@ function readPayment(req, existing) {
     }
   }
 
+  // The group runs several bank accounts, so every transfer and every cheque has
+  // to say which of ours it came out of - otherwise the cheque register cannot
+  // tell you what each bank is carrying.
+  const fromAccountId = isBlank(b.from_bank_account_id) ? null : Number(b.from_bank_account_id);
+  if ((isTransfer || isCheque) && !fromAccountId) {
+    const available = db
+      .prepare('SELECT COUNT(*) c FROM bank_accounts WHERE company_id = ? AND active = 1')
+      .get(companyId).c;
+    if (available > 0) {
+      throw badRequest(
+        isCheque
+          ? 'Choose which of our accounts the cheque is drawn on'
+          : 'Choose which of our bank accounts the money was transferred from'
+      );
+    }
+  }
+  if (fromAccountId) {
+    const acc = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(fromAccountId);
+    if (!acc) throw badRequest('That bank account no longer exists');
+    if (acc.company_id !== companyId) {
+      throw badRequest('That bank account belongs to a different company');
+    }
+  }
+
   let chequeNo = null;
   let chequeDate = null;
   let chequeBank = null;
@@ -370,7 +396,7 @@ function readPayment(req, existing) {
     party_account_no: text(b.party_account_no) || (isTransfer ? supplier.bank_account_no : null),
     party_iban: text(b.party_iban) || (isTransfer ? supplier.iban : null),
     transfer_ref: text(b.transfer_ref),
-    from_bank_account_id: isBlank(b.from_bank_account_id) ? null : Number(b.from_bank_account_id),
+    from_bank_account_id: fromAccountId,
     cheque_no: chequeNo,
     cheque_date: chequeDate,
     cheque_bank_name: chequeBank,

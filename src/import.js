@@ -60,11 +60,36 @@ if (!flags.file) {
 
 // ------------------------------------------------------------------ helpers
 
+/**
+ * Pull the literal out of a Google Sheets export formula.
+ *
+ * A workbook exported from Google Sheets wraps every cell as
+ *   IFERROR(__xludf.DUMMYFUNCTION("..."), "DATE ")
+ * where the second argument is the value Google last displayed. Excel never
+ * evaluates that, so `result` comes back null and the cell looks empty - which
+ * is how two of the column headings went missing and took their whole column
+ * with them. The fallback literal is the real value.
+ */
+function literalFromFormula(formula) {
+  if (typeof formula !== 'string') return null;
+  const quoted = /,\s*"((?:[^"]|"")*)"\s*\)\s*$/.exec(formula);
+  if (quoted) return quoted[1].replace(/""/g, '"').trim() || null;
+  const numeric = /,\s*(-?\d+(?:\.\d+)?)\s*\)\s*$/.exec(formula);
+  if (numeric) return numeric[1];
+  return null;
+}
+
 const clean = (v) => {
   if (v === null || v === undefined) return null;
   // ExcelJS hands back objects for formulas, rich text and hyperlinks.
   if (typeof v === 'object') {
-    if (v instanceof Date) return v;
+    // A few cells in the log hold a date serial outside the valid range, which
+    // arrives as an Invalid Date. Treat those as empty rather than throwing.
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+    if (v.formula !== undefined) {
+      const computed = clean(v.result);
+      return computed === null ? clean(literalFromFormula(v.formula)) : computed;
+    }
     if (v.result !== undefined) return clean(v.result);
     if (v.richText) return v.richText.map((t) => t.text).join('').trim() || null;
     if (v.text !== undefined) return String(v.text).trim() || null;
@@ -77,7 +102,9 @@ const clean = (v) => {
 const text = (v) => {
   const c = clean(v);
   if (c === null) return null;
-  if (c instanceof Date) return c.toISOString().slice(0, 10);
+  if (c instanceof Date) {
+    return Number.isNaN(c.getTime()) ? null : c.toISOString().slice(0, 10);
+  }
   return String(c).replace(/\s+/g, ' ').trim() || null;
 };
 
@@ -93,6 +120,7 @@ const asDate = (v) => {
   const c = clean(v);
   if (c === null) return null;
   if (c instanceof Date) {
+    if (Number.isNaN(c.getTime())) return null;
     // Excel dates come through as UTC midnight; take the calendar day as-is.
     return c.toISOString().slice(0, 10);
   }
@@ -207,8 +235,13 @@ async function main() {
   const stats = {
     rows: dataRows.length,
     termNumeric: 0, termFromSupplier: 0, termUnknown: 0,
-    noInvoiceNo: 0, zeroTotal: 0, paidCapped: 0
+    noInvoiceNo: 0, zeroTotal: 0, paidCapped: 0, dateEstimated: 0
   };
+
+  // The log is written in date order, so when a row's date cell is corrupt the
+  // previous row's date is the closest thing to the truth we have. Better than
+  // dropping the invoice and losing its balance.
+  let lastGoodDate = null;
 
   dataRows.forEach((r, i) => {
     const supplierName = text(r[col.supplier]);
@@ -221,8 +254,19 @@ async function main() {
       ref = `NOREF-${text(r[col.sno]) || i + 1}`;
     }
 
-    const invoiceDate = asDate(r[col.invoiceDate]) || asDate(r[col.submitted]);
+    let invoiceDate = asDate(r[col.invoiceDate]) || asDate(r[col.submitted]);
     let submitted = asDate(r[col.submitted]);
+    let dateEstimated = false;
+
+    if (!invoiceDate && !submitted) {
+      // Both cells unreadable - carry the previous row's date forward.
+      invoiceDate = lastGoodDate;
+      submitted = lastGoodDate;
+      dateEstimated = true;
+      stats.dateEstimated += 1;
+    }
+    lastGoodDate = submitted || invoiceDate || lastGoodDate;
+
     // The log is written when the invoice reaches accounts, so DATE is the day it
     // was submitted. Guard against a row where that lands before the invoice date.
     if (submitted && invoiceDate && submitted < invoiceDate) submitted = invoiceDate;
@@ -242,6 +286,7 @@ async function main() {
       submitted,
       termDays,
       rawTerm,
+      dateEstimated,
       category: text(r[col.category]),
       lpo: text(r[col.lpo]),
       subtotal: money(num(r[col.amount])),
@@ -295,6 +340,7 @@ async function main() {
   console.log(`    Taken from the sheet ${stats.termNumeric}`);
   console.log(`    From supplier's usual terms (TERM was blank or a payment mode) ${stats.termFromSupplier}`);
   console.log(`    Unknown, treated as due on submission ${stats.termUnknown}`);
+  if (stats.dateEstimated) console.log(`    Rows whose date cell was unreadable, dated from the row above: ${stats.dateEstimated}`);
   if (stats.noInvoiceNo) console.log(`    Rows with no invoice reference, kept as NOREF-n: ${stats.noInvoiceNo}`);
   if (stats.zeroTotal) console.log(`    Rows skipped with no amount: ${stats.zeroTotal}`);
   if (stats.paidCapped) console.log(`    Rows where PAID exceeded the total, capped: ${stats.paidCapped}`);
@@ -386,6 +432,7 @@ async function main() {
     let settlementNo = 0;
 
     parsed.forEach((p) => {
+      if (!p.invoiceDate) { out.invoicesSkipped += 1; return; }
       const supplierId = existingSuppliers.get(p.supplierKey);
       if (findInvoice.get(company.id, supplierId, p.invoiceNo)) {
         out.invoicesSkipped += 1;
@@ -402,6 +449,7 @@ async function main() {
       if (p.rawTerm && !/^\d+$/.test(p.rawTerm)) notes.push(`Sheet TERM: ${p.rawTerm}`);
       if (p.termInferred) notes.push(`Terms taken from this supplier's usual ${p.termDays} days`);
       if (p.status) notes.push(`Sheet status: ${p.status}`);
+      if (p.dateEstimated) notes.push('The date cell was unreadable; taken from the row above');
       notes.push('Imported from the purchase log');
 
       const info = insInvoice.run(
@@ -508,6 +556,13 @@ async function main() {
   } else {
     console.log(`  NOTE: the outstanding figure differs by ${fmt(drift)}.`);
     console.log('  That is expected if some invoices were already in the app before this run.');
+  }
+  if (result.invoicesSkipped) {
+    console.log('');
+    console.log(`  ${result.invoicesSkipped} row(s) were skipped because the same invoice number`);
+    console.log('  already exists for that supplier. The sheet lists them twice, so the invoiced');
+    console.log('  and paid totals above are lower by the duplicated amount. Where those rows were');
+    console.log('  settled in full, what is still outstanding is unaffected.');
   }
   console.log('');
 }

@@ -9,13 +9,14 @@ const cookieParser = require('cookie-parser');
 const config = require('./config');
 const { migrate, DB_FILE, db } = require('./db');
 const { requireAuth } = require('./auth');
-const { bootstrap } = require('./bootstrap');
+const { bootstrap, applyEnvPasswords } = require('./bootstrap');
 
 migrate();
 
 // A hosted deployment starts with an empty database and nobody who can sign in.
 // This only does anything when there are no users at all.
 const firstRun = config.autoBootstrap ? bootstrap() : { created: false };
+if (config.autoBootstrap) applyEnvPasswords();
 
 const app = express();
 app.set('trust proxy', 1);
@@ -38,6 +39,7 @@ app.use('/api/purchase-invoices', require('./routes/purchases'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/petty-cash', require('./routes/pettycash'));
+app.use('/api/facilities', require('./routes/facilities'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/admin', require('./routes/admin'));
 

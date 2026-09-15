@@ -4,7 +4,7 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requirePermission, assertCompanyAccess } = require('../auth');
 const {
-  money, today, addDays, toDate, notFound, text,
+  money, today, addDays, toDate, notFound, text, monthRange,
   AGEING_BUCKETS, AGEING_LABELS, SQL_SETTLED, SQL_PDC_OUTSTANDING
 } = require('../util');
 const { INVOICE_SELECT, PAYMENT_SELECT, enrichInvoice } = require('../queries');
@@ -576,6 +576,219 @@ router.get('/group-summary', requirePermission('report.group'), (req, res, next)
     });
 
     res.json({ as_of: asOf, year, rows, totals });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ------------------------------------------------------------------ what falls due in a month
+
+/**
+ * Everything the group has to pay in one month, in one place: supplier invoices
+ * reaching their due date, cheques dated that month, settlement cheques, bank
+ * instalments on the vehicle and equipment loans, and any LC maturing.
+ *
+ * This is the "how much do I need this month" answer, which otherwise means
+ * looking in four different places.
+ */
+router.get('/monthly-commitments', (req, res, next) => {
+  try {
+    const ids = scope(req);
+    const { month, from, to } = monthRange(req.query.month);
+    const list = inList(ids);
+
+    // Supplier invoices reaching their due date this month and still owed.
+    const invoices = db
+      .prepare(
+        `${INVOICE_SELECT}
+          WHERE i.company_id IN (${list})
+            AND i.status NOT IN ('CANCELLED', 'ON_HOLD')
+            AND i.due_date BETWEEN ? AND ?
+            AND (i.total_amount - IFNULL(paid.amt, 0)) > 0.005
+          ORDER BY i.due_date, s.name`
+      )
+      .all(...ids, from, to)
+      .map((r) => enrichInvoice(r));
+
+    // Cheques written against this month, split by where they have got to.
+    const chequesIn = (statuses) => db
+      .prepare(
+        `${PAYMENT_SELECT}
+          WHERE p.company_id IN (${list})
+            AND p.mode IN ('PDC','CHEQUE')
+            AND p.status <> 'CANCELLED'
+            AND p.pdc_status IN (${statuses.map(() => '?').join(',')})
+            AND p.cheque_date BETWEEN ? AND ?
+          ORDER BY p.cheque_date, s.name`
+      )
+      .all(...ids, ...statuses, from, to);
+
+    const pdc = chequesIn(['ISSUED', 'PRESENTED']);
+    const stl = chequesIn(['SETTLED']);
+    const clearedThisMonth = chequesIn(['CLEARED']);
+
+    // Bank instalments and letters of credit falling due this month.
+    const dues = db
+      .prepare(
+        `SELECT d.*, f.type, f.reference, f.vehicle_no, f.bank_name, f.description,
+                c.code AS company_code, c.name AS company_name
+           FROM facility_dues d
+           JOIN bank_facilities f ON f.id = d.facility_id
+           JOIN companies c ON c.id = d.company_id
+          WHERE d.company_id IN (${list})
+            AND d.status <> 'SKIPPED'
+            AND d.due_date BETWEEN ? AND ?
+          ORDER BY d.due_date, f.type, f.vehicle_no`
+      )
+      .all(...ids, from, to);
+
+    const loanTypes = ['VEHICLE_LOAN', 'EQUIPMENT_LOAN', 'TERM_LOAN'];
+    const emi = dues.filter((d) => loanTypes.includes(d.type));
+    const lc = dues.filter((d) => !loanTypes.includes(d.type));
+
+    // Petty cash the owner has approved but which has not been handed over yet.
+    const petty = db
+      .prepare(
+        `SELECT r.*, e.name AS employee_name, c.code AS company_code
+           FROM petty_cash_requests r
+           JOIN employees e ON e.id = r.employee_id
+           JOIN companies c ON c.id = r.company_id
+          WHERE r.company_id IN (${list}) AND r.status = 'APPROVED'
+          ORDER BY r.request_date`
+      )
+      .all(...ids);
+
+    const sum = (rows, field) => money(rows.reduce((t, r) => t + Number(r[field] || 0), 0));
+    const unpaid = (rows) => rows.filter((r) => r.status === 'DUE');
+
+    const sections = {
+      supplier_invoices: {
+        label: 'Supplier invoices falling due',
+        count: invoices.length,
+        amount: sum(invoices, 'outstanding'),
+        overdue_amount: sum(invoices.filter((i) => i.is_overdue), 'outstanding'),
+        rows: invoices
+      },
+      pdc: {
+        label: 'PDC issued, dated this month',
+        count: pdc.length,
+        amount: sum(pdc, 'amount'),
+        rows: pdc
+      },
+      stl: {
+        label: 'STL settlement cheques',
+        count: stl.length,
+        amount: sum(stl, 'amount'),
+        rows: stl
+      },
+      emi: {
+        label: 'Bank instalments (vehicle and equipment loans)',
+        count: unpaid(emi).length,
+        amount: sum(unpaid(emi), 'amount'),
+        paid_amount: sum(emi.filter((d) => d.status === 'PAID'), 'amount'),
+        rows: emi
+      },
+      lc: {
+        label: 'LC and trust receipts maturing',
+        count: unpaid(lc).length,
+        amount: sum(unpaid(lc), 'amount'),
+        paid_amount: sum(lc.filter((d) => d.status === 'PAID'), 'amount'),
+        rows: lc
+      },
+      petty_cash: {
+        label: 'Petty cash approved, not yet paid',
+        count: petty.length,
+        amount: sum(petty, 'amount'),
+        rows: petty
+      }
+    };
+
+    // A cheque already covers the invoice it was written against, so counting
+    // both would ask for the same money twice. The cheques are the firm
+    // commitment, so the invoice total here excludes whatever they cover.
+    const invoicesCoveredByCheques = sum(invoices, 'pdc_amount');
+    const invoicesToArrange = money(sections.supplier_invoices.amount - invoicesCoveredByCheques);
+
+    const total = money(
+      invoicesToArrange +
+      sections.pdc.amount +
+      sections.stl.amount +
+      sections.emi.amount +
+      sections.lc.amount +
+      sections.petty_cash.amount
+    );
+
+    res.json({
+      month, from, to,
+      sections,
+      invoices_covered_by_cheques: invoicesCoveredByCheques,
+      invoices_to_arrange: invoicesToArrange,
+      cleared_this_month: { count: clearedThisMonth.length, amount: sum(clearedThisMonth, 'amount') },
+      total
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Month-by-month totals, for the strip of buttons above the monthly view. */
+router.get('/commitment-calendar', (req, res, next) => {
+  try {
+    const ids = scope(req);
+    const list = inList(ids);
+    const months = Math.min(Math.max(Number(req.query.months || 12), 1), 36);
+    const startMonth = toDate(req.query.from) || `${today().slice(0, 7)}-01`;
+
+    const out = [];
+    for (let i = 0; i < months; i += 1) {
+      const d = new Date(`${startMonth.slice(0, 7)}-01T00:00:00Z`);
+      d.setUTCMonth(d.getUTCMonth() + i);
+      const { month, from, to } = monthRange(d.toISOString().slice(0, 7));
+
+      const inv = db.prepare(
+        `SELECT COUNT(*) cnt, ROUND(IFNULL(SUM(i.total_amount - IFNULL(paid.amt, 0)), 0), 2) amt
+           FROM purchase_invoices i
+           LEFT JOIN (SELECT a.invoice_id, SUM(a.amount) amt FROM payment_allocations a
+                        JOIN payments p ON p.id = a.payment_id WHERE ${SQL_SETTLED}
+                       GROUP BY a.invoice_id) paid ON paid.invoice_id = i.id
+          WHERE i.company_id IN (${list}) AND i.status NOT IN ('CANCELLED','ON_HOLD')
+            AND i.due_date BETWEEN ? AND ?
+            AND (i.total_amount - IFNULL(paid.amt, 0)) > 0.005`
+      ).get(...ids, from, to);
+
+      const chq = db.prepare(
+        `SELECT
+           ROUND(IFNULL(SUM(CASE WHEN pdc_status IN ('ISSUED','PRESENTED') THEN amount END), 0), 2) pdc,
+           ROUND(IFNULL(SUM(CASE WHEN pdc_status = 'SETTLED' THEN amount END), 0), 2) stl,
+           SUM(CASE WHEN pdc_status IN ('ISSUED','PRESENTED') THEN 1 ELSE 0 END) pdc_count,
+           SUM(CASE WHEN pdc_status = 'SETTLED' THEN 1 ELSE 0 END) stl_count
+           FROM payments
+          WHERE company_id IN (${list}) AND mode IN ('PDC','CHEQUE') AND status <> 'CANCELLED'
+            AND cheque_date BETWEEN ? AND ?`
+      ).get(...ids, from, to);
+
+      const fac = db.prepare(
+        `SELECT
+           ROUND(IFNULL(SUM(CASE WHEN f.type IN ('VEHICLE_LOAN','EQUIPMENT_LOAN','TERM_LOAN')
+                                 THEN d.amount END), 0), 2) emi,
+           ROUND(IFNULL(SUM(CASE WHEN f.type NOT IN ('VEHICLE_LOAN','EQUIPMENT_LOAN','TERM_LOAN')
+                                 THEN d.amount END), 0), 2) lc
+           FROM facility_dues d JOIN bank_facilities f ON f.id = d.facility_id
+          WHERE d.company_id IN (${list}) AND d.status = 'DUE'
+            AND d.due_date BETWEEN ? AND ?`
+      ).get(...ids, from, to);
+
+      out.push({
+        month,
+        invoices: money(inv.amt), invoice_count: inv.cnt,
+        pdc: money(chq.pdc), pdc_count: chq.pdc_count || 0,
+        stl: money(chq.stl), stl_count: chq.stl_count || 0,
+        emi: money(fac.emi), lc: money(fac.lc),
+        total: money(inv.amt + chq.pdc + chq.stl + fac.emi + fac.lc)
+      });
+    }
+
+    res.json({ months: out });
   } catch (err) {
     next(err);
   }

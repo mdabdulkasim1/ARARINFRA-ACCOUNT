@@ -293,14 +293,14 @@ router.post('/receipts/:id/pdc-status', requirePermission('receipt.edit'), (req,
       throw badRequest('Only cheque receipts have a cheque status');
     }
     const status = String(req.body.status || '').toUpperCase();
-    const allowed = ['ISSUED', 'PRESENTED', 'CLEARED', 'BOUNCED', 'CANCELLED', 'REPLACED'];
+    const allowed = ['ISSUED', 'PRESENTED', 'CLEARED', 'SETTLED', 'BOUNCED', 'CANCELLED', 'REPLACED'];
     if (!allowed.includes(status)) throw badRequest(`Cheque status must be one of: ${allowed.join(', ')}`);
     db.prepare(
       `UPDATE receipts SET pdc_status = ?, cleared_date = ?, bounce_reason = ?,
               status = CASE WHEN ? = 'CANCELLED' THEN 'CANCELLED' ELSE 'COMPLETED' END,
               updated_by = ?, updated_at = datetime('now') WHERE id = ?`
     ).run(
-      status, status === 'CLEARED' ? (toDate(req.body.cleared_date) || today()) : null,
+      status, (status === 'CLEARED' || status === 'SETTLED') ? (toDate(req.body.cleared_date) || today()) : null,
       status === 'BOUNCED' ? text(req.body.reason) : null, status, req.user.id, existing.id
     );
     refreshInvoicesForReceipt(existing.id);

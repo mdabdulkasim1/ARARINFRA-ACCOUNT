@@ -44,6 +44,50 @@ function addDays(dateStr, days) {
   return t.toISOString().slice(0, 10);
 }
 
+/**
+ * The nth monthly due date on a given day of the month, counted from a start.
+ * A day past the end of a short month lands on its last day, the way a bank
+ * takes an instalment dated the 31st in February.
+ */
+function monthlyDueDate(startDate, monthOffset, dueDay) {
+  const base = toDate(startDate);
+  if (!base) return null;
+  const [y, m] = base.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + Number(monthOffset || 0), 1));
+  const year = target.getUTCFullYear();
+  const month = target.getUTCMonth();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const day = Math.min(Math.max(Number(dueDay || 1), 1), lastDay);
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Whole months from a to b, counting calendar months only. */
+function monthsBetween(a, b) {
+  const x = toDate(a);
+  const y = toDate(b);
+  if (!x || !y) return 0;
+  const [ay, am] = x.split('-').map(Number);
+  const [by, bm] = y.split('-').map(Number);
+  return (by - ay) * 12 + (bm - am);
+}
+
+/** First and last day of a 'YYYY-MM' month. */
+function monthRange(month) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(month || '').trim());
+  if (!m) {
+    const now = today();
+    return monthRange(now.slice(0, 7));
+  }
+  const year = Number(m[1]);
+  const mon = Number(m[2]);
+  const last = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+  return {
+    month: `${m[1]}-${m[2]}`,
+    from: `${m[1]}-${m[2]}-01`,
+    to: `${m[1]}-${m[2]}-${String(last).padStart(2, '0')}`
+  };
+}
+
 /** Whole days from a to b (b - a). Negative when b is before a. */
 function daysBetween(a, b) {
   const x = toDate(a);
@@ -96,7 +140,8 @@ const AGEING_LABELS = {
 function isSettled(payment) {
   if (!payment || payment.status === 'CANCELLED') return false;
   if (payment.mode === 'PDC' || payment.mode === 'CHEQUE') {
-    return payment.pdc_status === 'CLEARED';
+    // SETTLED is the sheet's "STL": the cheque was honoured, so the money is gone.
+    return payment.pdc_status === 'CLEARED' || payment.pdc_status === 'SETTLED';
   }
   return payment.status === 'COMPLETED';
 }
@@ -111,7 +156,7 @@ function isPdcOutstanding(payment) {
 /** SQL fragment matching settled payments, for use inside sub-selects. */
 const SQL_SETTLED = `(
   p.status <> 'CANCELLED' AND (
-    (p.mode IN ('PDC','CHEQUE') AND p.pdc_status = 'CLEARED')
+    (p.mode IN ('PDC','CHEQUE') AND p.pdc_status IN ('CLEARED','SETTLED'))
     OR (p.mode NOT IN ('PDC','CHEQUE') AND p.status = 'COMPLETED')
   )
 )`;
@@ -176,6 +221,9 @@ function bool(v, dflt = false) {
 module.exports = {
   money,
   nearlyEqual,
+  monthlyDueDate,
+  monthsBetween,
+  monthRange,
   isBlank,
   toDate,
   today,

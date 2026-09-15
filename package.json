@@ -10,11 +10,12 @@
     "dev": "node --watch src/server.js",
     "seed": "node src/seed.js",
     "reset": "node src/seed.js --reset",
-    "test": "node test/smoke.js && node test/hosted.js",
+    "test": "node test/smoke.js && node test/hosted.js && node test/facilities.js",
     "import": "node src/import.js",
     "test:smoke": "node test/smoke.js",
     "test:hosted": "node test/hosted.js",
-    "set-password": "node src/set-password.js"
+    "set-password": "node src/set-password.js",
+    "test:facilities": "node test/facilities.js"
   },
   "engines": {
     "node": ">=18 <23"

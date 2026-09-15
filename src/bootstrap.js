@@ -16,7 +16,7 @@
 
 const crypto = require('crypto');
 const { db } = require('./db');
-const { hashPassword } = require('./auth');
+const { hashPassword, checkPassword } = require('./auth');
 const config = require('./config');
 
 const COMPANIES = [
@@ -34,6 +34,10 @@ const STAFF = [
   { key: 'ACCOUNTANT1', name: 'Accountant One',  email: 'accountant1@ararinfra.com', role: 'ACCOUNTANT' },
   { key: 'ACCOUNTANT2', name: 'Accountant Two',  email: 'accountant2@ararinfra.com', role: 'ACCOUNTANT' }
 ];
+
+// The banks the group actually uses, from the purchase log. Each company gets a
+// row per bank so a transfer can always say which account it came out of.
+const BANKS = ['ADCB', 'Emirates NBD', 'RAK Bank'];
 
 const CATEGORIES = [
   ['Materials', 'EXPENSE'], ['Subcontractor', 'EXPENSE'], ['Equipment hire', 'EXPENSE'],
@@ -72,7 +76,16 @@ function bootstrap() {
     const insCat = db.prepare('INSERT OR IGNORE INTO categories (name, kind, active) VALUES (?, ?, 1)');
     CATEGORIES.forEach(([name, kind]) => insCat.run(name, kind));
 
-    const companies = db.prepare('SELECT id FROM companies').all();
+    const companies = db.prepare('SELECT id, name FROM companies').all();
+
+    const insBank = db.prepare(
+      `INSERT INTO bank_accounts (company_id, bank_name, account_name, currency, active)
+       VALUES (?, ?, ?, ?, 1)`
+    );
+    companies.forEach((c) => {
+      BANKS.forEach((bank) => insBank.run(c.id, bank, c.name, config.currency));
+    });
+
     const insUser = db.prepare(
       `INSERT INTO users (name, email, password_hash, role, active, must_change_password)
        VALUES (?, ?, ?, ?, 1, ?)`
@@ -112,4 +125,41 @@ function bootstrap() {
   return { created: true, users: STAFF.length, companies: COMPANIES.length };
 }
 
-module.exports = { bootstrap, generatePassword };
+/**
+ * Apply passwords declared in the environment to accounts that already exist.
+ *
+ * The first-run bootstrap only fires on an empty database, so without this a
+ * password set in the host's variables after the first deploy would never take
+ * effect - and on a hosted box there is no terminal to run set-password in.
+ *
+ * Declaring a password makes it authoritative: it is reapplied on every start.
+ * Remove the variable once people manage their own passwords in the app,
+ * otherwise the next deploy puts the declared one back.
+ */
+function applyEnvPasswords() {
+  const applied = [];
+  STAFF.forEach((person) => {
+    const supplied = process.env[`${person.key}_PASSWORD`];
+    if (!supplied || supplied.length < 8) return;
+
+    const email = (process.env[`${person.key}_EMAIL`] || person.email).trim().toLowerCase();
+    const user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email);
+    if (!user) return;
+
+    // Only write when it has actually changed, so the hash is not churned on
+    // every restart and "last changed" stays meaningful.
+    if (checkPassword(supplied, user.password_hash)) return;
+
+    db.prepare(
+      'UPDATE users SET password_hash = ?, must_change_password = 0, active = 1 WHERE id = ?'
+    ).run(hashPassword(supplied), user.id);
+    applied.push(email);
+  });
+
+  if (applied.length) {
+    console.log(`  [auth] applied the password from the environment for: ${applied.join(', ')}`);
+  }
+  return applied;
+}
+
+module.exports = { bootstrap, applyEnvPasswords, generatePassword, STAFF };

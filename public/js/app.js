@@ -12,6 +12,8 @@
     'payments': { title: 'Payments', perm: 'payment.view', render: (h, q) => window.Payables.renderPayments(h, q) },
     'pdc': { title: 'Cheque register', perm: 'payment.view', render: (h) => window.Payables.renderPdc(h) },
     'petty': { title: 'Petty cash', perm: 'petty.view', render: (h, q) => window.Petty.render(h, q) },
+    'monthly': { title: 'What has to be paid', perm: 'report.view', render: (h, q) => window.Monthly.renderMonthly(h, q) },
+    'facilities': { title: 'Bank facilities', perm: 'facility.view', render: (h, q) => window.Monthly.renderFacilities(h, q) },
     'income': { title: 'Income', perm: 'sales.view', render: (h, q) => window.Income.render(h, q) },
     'ageing': { title: 'Supplier ageing', perm: 'report.view', render: (h) => window.Reports.renderAgeing(h) },
     'group': { title: 'Group summary', perm: 'report.group', render: (h) => window.Reports.renderGroup(h) },
@@ -27,10 +29,12 @@
       { href: '#/dashboard', icon: '&#9632;', label: 'Dashboard', key: 'dashboard' }
     ] },
     { group: 'Money out', items: [
+      { href: '#/monthly', icon: '&#128197;', label: 'What to pay', key: 'monthly', perm: 'report.view' },
       { href: '#/payables', icon: '&#128195;', label: 'Supplier invoices', key: 'payables', perm: 'invoice.view' },
       { href: '#/payments', icon: '&#128181;', label: 'Payments', key: 'payments', perm: 'payment.view' },
       { href: '#/pdc', icon: '&#128179;', label: 'Cheque register', key: 'pdc', perm: 'payment.view' },
-      { href: '#/petty', icon: '&#128176;', label: 'Petty cash', key: 'petty', perm: 'petty.view', badge: 'petty' }
+      { href: '#/petty', icon: '&#128176;', label: 'Petty cash', key: 'petty', perm: 'petty.view', badge: 'petty' },
+      { href: '#/facilities', icon: '&#128663;', label: 'Loans & LC', key: 'facilities', perm: 'facility.view' }
     ] },
     { group: 'Money in', items: [
       { href: '#/income', icon: '&#128200;', label: 'Income', key: 'income', perm: 'sales.view' }

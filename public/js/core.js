@@ -109,7 +109,15 @@
       return `${months[Number(p[1]) - 1]} ${p[0]}`;
     },
     label(v) {
-      return String(v || '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+      // Title case, but acronyms stay shouting: "LC", not "Lc".
+      const acronyms = ['LC', 'PDC', 'STL', 'EMI', 'VAT', 'TRN', 'IBAN', 'UTR', 'LPO'];
+      return String(v || '')
+        .replace(/_/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w+\b/g, (word) => {
+          const up = word.toUpperCase();
+          return acronyms.includes(up) ? up : word.charAt(0).toUpperCase() + word.slice(1);
+        });
     },
     initials(name) {
       return String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
