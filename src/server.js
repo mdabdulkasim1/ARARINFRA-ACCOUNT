@@ -102,6 +102,31 @@ if (require.main === module) {
     if (firstRun.created) {
       console.log(`  first run         created ${firstRun.companies} companies and ${firstRun.users} users`);
     }
+    // Who can sign in, and where each password came from. Without this the only
+    // way to work out why a sign in is refused is guesswork - the accounts are
+    // created by the app, so nobody outside the log knows what they are.
+    const accounts = db
+      .prepare('SELECT email, role FROM users WHERE active = 1 ORDER BY role, email')
+      .all();
+    if (accounts.length) {
+      console.log('');
+      console.log('  Accounts that can sign in:');
+      accounts.forEach((a) => {
+        const key = {
+          OWNER: 'OWNER',
+          FINANCE_MANAGER: 'FINANCE',
+          ACCOUNTANT: null
+        }[a.role];
+        const fromEnv = key
+          ? !!process.env[`${key}_PASSWORD`]
+          : !!(process.env.ACCOUNTANT1_PASSWORD || process.env.ACCOUNTANT2_PASSWORD);
+        console.log(
+          `    ${a.role.padEnd(16)} ${a.email.padEnd(32)} ` +
+          `password ${fromEnv ? 'set from the environment' : 'generated - see the FIRST RUN box above'}`
+        );
+      });
+    }
+
     if (!config.storageIsPersistent) {
       console.log('');
       console.log('  ****************************************************************');
