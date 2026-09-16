@@ -418,6 +418,77 @@ router.get('/pdc-register', (req, res, next) => {
   }
 });
 
+// ------------------------------------------------------------------ trace
+
+/**
+ * Find a supplier from whatever is to hand.
+ *
+ * When a question comes in about a bill it is rarely the supplier's name that is
+ * quoted - it is an invoice number off a statement, or a cheque number the bank
+ * has queried. All of them lead back to one supplier, so all of them are worth
+ * searching, and each answer says which supplier to open.
+ */
+router.get('/trace', (req, res, next) => {
+  try {
+    const ids = scope(req);
+    const q = text(req.query.q);
+    if (!q || q.length < 2) {
+      return res.json({ q: q || '', suppliers: [], invoices: [], payments: [] });
+    }
+    const like = `%${q}%`;
+    const LIMIT = 25;
+
+    // Suppliers, with what they are owed, so the list is worth reading on its own.
+    const suppliers = db
+      .prepare(
+        `SELECT s.id AS supplier_id, s.name AS supplier_name, s.code AS supplier_code,
+                s.bank_name, s.active,
+                COUNT(i.id) AS invoices,
+                ROUND(IFNULL(SUM(i.total_amount - IFNULL(paid.amt, 0)), 0), 2) AS outstanding
+           FROM suppliers s
+           LEFT JOIN purchase_invoices i
+                  ON i.supplier_id = s.id AND i.company_id IN (${inList(ids)})
+                 AND i.status <> 'CANCELLED'
+           LEFT JOIN (
+             SELECT a.invoice_id, SUM(a.amount) AS amt
+               FROM payment_allocations a JOIN payments p ON p.id = a.payment_id
+              WHERE ${SQL_SETTLED} GROUP BY a.invoice_id
+           ) paid ON paid.invoice_id = i.id
+          WHERE s.name LIKE ? OR s.code LIKE ? OR s.trn LIKE ? OR s.bank_name LIKE ?
+          GROUP BY s.id
+          ORDER BY outstanding DESC, s.name
+          LIMIT ?`
+      )
+      .all(...ids, like, like, like, like, LIMIT);
+
+    const invoices = db
+      .prepare(
+        `${INVOICE_SELECT}
+          WHERE i.company_id IN (${inList(ids)})
+            AND (i.invoice_no LIKE ? OR i.description LIKE ? OR i.lpo_no LIKE ?)
+          ORDER BY i.invoice_date DESC, i.id DESC
+          LIMIT ?`
+      )
+      .all(...ids, like, like, like, LIMIT)
+      .map((r) => enrichInvoice(r, today()));
+
+    const payments = db
+      .prepare(
+        `${PAYMENT_SELECT}
+          WHERE p.company_id IN (${inList(ids)})
+            AND (p.payment_no LIKE ? OR p.cheque_no LIKE ? OR p.transfer_ref LIKE ?
+                 OR p.narration LIKE ? OR p.party_bank_name LIKE ?)
+          ORDER BY p.payment_date DESC, p.id DESC
+          LIMIT ?`
+      )
+      .all(...ids, like, like, like, like, like, LIMIT);
+
+    res.json({ q, limit: LIMIT, suppliers, invoices, payments });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ------------------------------------------------------------------ supplier statement
 
 router.get('/supplier-statement/:supplierId', (req, res, next) => {
