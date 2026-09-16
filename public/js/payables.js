@@ -1178,6 +1178,184 @@
       </div>`).join('')}</div>`;
   }
 
+  // ================================================================ trace
+
+  /**
+   * Find one supplier's history from whatever is to hand.
+   *
+   * A question about a bill rarely arrives with the supplier's name on it - it is
+   * an invoice number off their statement, or a cheque number the bank has
+   * queried. Any of those finds the supplier, and the supplier's own statement
+   * answers the rest, so this screen is a way in rather than a new report.
+   */
+  let traceTerm = '';
+
+  async function renderTrace(host, query) {
+    if (query && query.q !== undefined) traceTerm = query.q;
+    if (query && query.supplier) {
+      await renderSupplierWithBack(host, query.supplier);
+      return;
+    }
+
+    host.innerHTML = `
+      <div class="toolbar">
+        <div>
+          <h2 style="font-size:17px">Trace a supplier</h2>
+          <div class="mini-note">Type a supplier name, an invoice number or a cheque number
+            to open everything recorded against them.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="body">
+          <div class="field grow">
+            <label for="trace-q">Search</label>
+            <input type="search" id="trace-q" value="${esc(traceTerm)}" autocomplete="off"
+                   placeholder="Supplier name or code, invoice number, cheque number, transfer reference">
+            <div class="hint">At least two characters. Everything is searched at once.</div>
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn primary" id="trace-go">Search</button>
+            <button class="btn" id="trace-browse">Pick from the full supplier list</button>
+          </div>
+        </div>
+      </div>
+      <div id="trace-results"></div>`;
+
+    const box = host.querySelector('#trace-results');
+    const input = host.querySelector('#trace-q');
+    const run = () => {
+      traceTerm = input.value.trim();
+      drawTrace(box, host);
+    };
+    host.querySelector('#trace-go').onclick = run;
+    input.onkeydown = (e) => { if (e.key === 'Enter') run(); };
+    host.querySelector('#trace-browse').onclick = () => pickSupplier(host);
+    input.focus();
+
+    if (traceTerm) await drawTrace(box, host);
+  }
+
+  /** The whole supplier list, for when the name is not remembered at all. */
+  function pickSupplier(host) {
+    const modal = Modal.open({
+      title: 'Pick a supplier',
+      subtitle: 'Their full history opens when you choose one',
+      size: 'narrow',
+      body: C.formFields([
+        { name: 'supplier_id', label: 'Supplier', type: 'select', required: true,
+          options: C.opt.suppliers('Choose a supplier'), value: '' }
+      ]),
+      footer: `<button class="btn" data-act="cancel">Cancel</button>
+               <button class="btn primary" data-act="open">Open</button>`
+    });
+    modal.querySelector('[data-act="cancel"]').onclick = () => Modal.close();
+    modal.querySelector('[data-act="open"]').onclick = () => {
+      const id = modal.querySelector('[name="supplier_id"]').value;
+      if (!id) return;
+      Modal.close();
+      location.hash = `#/trace?supplier=${id}`;
+    };
+  }
+
+  async function drawTrace(box, host) {
+    if (!traceTerm || traceTerm.length < 2) {
+      box.innerHTML = '<div class="empty"><div class="big">&#128269;</div>'
+        + '<div>Type at least two characters to search.</div></div>';
+      return;
+    }
+    box.innerHTML = '<div class="loading">Searching&hellip;</div>';
+    const params = new URLSearchParams({ q: traceTerm });
+    if (C.State.companyId) params.set('company_id', C.State.companyId);
+    const data = await API.get(`/api/reports/trace?${params}`);
+
+    const nothing = !data.suppliers.length && !data.invoices.length && !data.payments.length;
+    if (nothing) {
+      box.innerHTML = `<div class="empty"><div class="big">&#128533;</div>
+        <div>Nothing matches &ldquo;${esc(traceTerm)}&rdquo;.</div>
+        <div class="mini-note" style="margin-top:6px">Try part of the name, or the invoice number as the supplier writes it.</div></div>`;
+      return;
+    }
+
+    const capped = (rows) => rows.length >= data.limit
+      ? `<div class="mini-note" style="padding:8px 2px 0">Showing the first ${fmt.int(data.limit)}. Narrow the search to see the rest.</div>`
+      : '';
+
+    box.innerHTML = `
+      ${data.suppliers.length ? `
+        <div class="card">
+          <header><h3>Suppliers</h3><span class="sub">open one for its full history</span></header>
+          <div class="body tight">
+            ${C.table(data.suppliers, [
+              { label: 'Supplier', render: (r) => `<b>${esc(r.supplier_name)}</b>`
+                  + (r.active ? '' : ' <span class="badge grey">Inactive</span>') },
+              { label: 'Code', mono: true, render: (r) => esc(r.supplier_code) },
+              { label: 'Bank', hidePhone: true, render: (r) => esc(r.bank_name || '-') },
+              { label: 'Invoices', num: true, render: (r) => fmt.int(r.invoices) },
+              { label: 'Outstanding', num: true, render: (r) => `<b>${fmt.money(r.outstanding)}</b>` },
+              { label: '', render: (r) => `<button class="btn small primary" data-open="${r.supplier_id}">History</button>` }
+            ], { empty: 'No supplier matches' })}
+            ${capped(data.suppliers)}
+          </div>
+        </div>` : ''}
+
+      ${data.invoices.length ? `
+        <div class="card">
+          <header><h3>Invoices</h3><span class="sub">matched on the number, the LPO or the description</span></header>
+          <div class="body tight">
+            ${C.table(data.invoices, [
+              { label: 'Invoice no', mono: true, render: (r) => esc(r.invoice_no) },
+              { label: 'Supplier', render: (r) => `<b>${esc(r.supplier_name)}</b>` },
+              { label: 'Invoice date', hidePhone: true, render: (r) => fmt.date(r.invoice_date) },
+              { label: 'Submitted', hidePhone: true, render: (r) => r.submitted_date ? fmt.date(r.submitted_date) : '<span class="badge amber">No</span>' },
+              { label: 'Due', render: (r) => r.due_date
+                  ? `<span class="nowrap ${r.is_overdue ? 'amount-danger strong' : ''}">${fmt.date(r.due_date)}</span>` : '-' },
+              { label: 'Total', num: true, render: (r) => fmt.money(r.total_amount) },
+              { label: 'Outstanding', num: true, render: (r) => `<b>${fmt.money(r.outstanding)}</b>` },
+              { label: '', render: (r) => `<button class="btn small" data-open="${r.supplier_id}">History</button>` }
+            ], { rowClass: C.invoiceRowClass, empty: 'No invoice matches' })}
+            ${capped(data.invoices)}
+          </div>
+        </div>` : ''}
+
+      ${data.payments.length ? `
+        <div class="card">
+          <header><h3>Payments and cheques</h3><span class="sub">matched on the reference, the cheque number or the bank</span></header>
+          <div class="body tight">
+            ${C.table(data.payments, [
+              { label: 'Date', render: (r) => fmt.date(r.payment_date) },
+              { label: 'Reference', mono: true, render: (r) => esc(r.payment_no) },
+              { label: 'Supplier', render: (r) => `<b>${esc(r.supplier_name)}</b>` },
+              { label: 'Mode', render: (r) => esc(C.MODE_LABEL[r.mode] || r.mode) },
+              { label: 'Cheque', mono: true, hidePhone: true, render: (r) => r.cheque_no
+                  ? `${esc(r.cheque_no)}<br><span class="mini-note">${fmt.date(r.cheque_date)}</span>` : '-' },
+              { label: 'Bank', hidePhone: true, render: (r) => esc(r.cheque_bank_name || r.party_bank_name || r.from_bank_name || '-') },
+              { label: 'Amount', num: true, render: (r) => `<b>${fmt.money(r.amount)}</b>` },
+              { label: '', render: (r) => `<button class="btn small" data-open="${r.supplier_id}">History</button>` }
+            ], { empty: 'No payment matches' })}
+            ${capped(data.payments)}
+          </div>
+        </div>` : ''}`;
+
+    box.querySelectorAll('[data-open]').forEach((b) => {
+      b.onclick = () => { location.hash = `#/trace?supplier=${b.dataset.open}`; };
+    });
+  }
+
+  /** The statement, with a way back to the search that found it. */
+  async function renderSupplierWithBack(host, supplierId) {
+    await renderSupplier(host, supplierId);
+    const bar = host.querySelector('.toolbar .spacer');
+    if (!bar) return;
+    const back = document.createElement('button');
+    back.className = 'btn';
+    back.textContent = '\u2190 Back to trace';
+    back.onclick = () => {
+      location.hash = traceTerm ? `#/trace?q=${encodeURIComponent(traceTerm)}` : '#/trace';
+    };
+    bar.parentNode.insertBefore(back, bar.nextSibling);
+  }
+
   // ================================================================ supplier statement
 
   async function renderSupplier(host, supplierId) {
@@ -1289,7 +1467,7 @@
   }
 
   window.Payables = {
-    renderInvoices, renderPayments, renderPdc, renderSupplier,
+    renderInvoices, renderPayments, renderPdc, renderSupplier, renderTrace,
     openPaymentForInvoice, paymentForm, invoiceForm, optionsHtml, bindFilters
   };
 })();

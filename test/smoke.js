@@ -581,6 +581,45 @@ async function main() {
     });
   });
 
+  await check('trace finds a supplier by name, by invoice number and by cheque number', async () => {
+    const supplier = await owner('GET', '/api/suppliers/1');
+    const name = supplier.data.name || 'Supplier';
+
+    const byName = await owner('GET', `/api/reports/trace?q=${encodeURIComponent(name.slice(0, 5))}`);
+    assert.strictEqual(byName.status, 200);
+    assert.ok(byName.data.suppliers.some((r) => r.supplier_id === 1), 'found by name');
+
+    const inv = await owner('GET', '/api/purchase-invoices?supplier_id=1');
+    const one = inv.data.rows[0];
+    const byInvoice = await owner('GET', `/api/reports/trace?q=${encodeURIComponent(one.invoice_no)}`);
+    assert.ok(byInvoice.data.invoices.some((r) => r.id === one.id), 'found by invoice number');
+    // Whatever is matched has to say which supplier to open.
+    byInvoice.data.invoices.forEach((r) => assert.ok(r.supplier_id && r.supplier_name));
+
+    const byCheque = await owner('GET', '/api/reports/trace?q=100777');
+    assert.ok(byCheque.data.payments.some((r) => r.cheque_no === '100777'), 'found by cheque number');
+    byCheque.data.payments.forEach((r) => assert.ok(r.supplier_id && r.supplier_name));
+  });
+
+  await check('trace stays quiet on a short or empty search, and finds nothing on nonsense', async () => {
+    for (const q of ['', 'a']) {
+      const r = await owner('GET', `/api/reports/trace?q=${q}`);
+      assert.strictEqual(r.status, 200);
+      assert.deepStrictEqual([r.data.suppliers, r.data.invoices, r.data.payments], [[], [], []]);
+    }
+    const none = await owner('GET', '/api/reports/trace?q=zzzzzzzzzz');
+    assert.deepStrictEqual([none.data.suppliers, none.data.invoices, none.data.payments], [[], [], []]);
+  });
+
+  await check('an accountant only traces the companies they are given', async () => {
+    // acc2 is scoped to a company of its own, so a search cannot reach past it.
+    const r = await acc2('GET', '/api/reports/trace?q=INV');
+    assert.strictEqual(r.status, 200);
+    const allowed = (await acc2('GET', '/api/companies')).data.map((c) => c.id);
+    r.data.invoices.forEach((i) => assert.ok(allowed.includes(i.company_id), 'invoice is in scope'));
+    r.data.payments.forEach((p) => assert.ok(allowed.includes(p.company_id), 'payment is in scope'));
+  });
+
   await check('the supplier statement reconciles', async () => {
     const r = await owner('GET', '/api/reports/supplier-statement/1');
     assert.strictEqual(r.status, 200);

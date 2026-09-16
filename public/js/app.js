@@ -23,6 +23,7 @@
     'petty-report': { title: 'Petty cash by employee', perm: 'report.view', render: (h) => window.Reports.renderPettySummary(h) },
     'audit': { title: 'Audit trail', perm: 'audit.view', render: (h) => window.Reports.renderAudit(h) },
     'masters': { title: 'Master data', perm: 'master.view', render: (h, q) => window.Masters.render(h, q) },
+    'trace': { title: 'Trace a supplier', perm: 'report.view', render: (h, q) => window.Payables.renderTrace(h, q) },
     'supplier': { title: 'Supplier statement', perm: 'report.view', render: (h, q, id) => window.Payables.renderSupplier(h, id) }
   };
 
@@ -43,6 +44,7 @@
       { href: '#/income', icon: '&#128200;', label: 'Income', key: 'income', perm: 'sales.view' }
     ] },
     { group: 'Reports', items: [
+      { href: '#/trace', icon: '&#128269;', label: 'Trace', key: 'trace', perm: 'report.view' },
       { href: '#/ageing', icon: '&#9202;', label: 'Supplier ageing', key: 'ageing', perm: 'report.view' },
       { href: '#/forecast', icon: '&#128198;', label: 'Supplier x month', key: 'forecast', perm: 'report.view' },
       { href: '#/group', icon: '&#127970;', label: 'Group summary', key: 'group', perm: 'report.group' },
