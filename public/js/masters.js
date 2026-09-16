@@ -49,11 +49,12 @@
     return map[tab](body, () => draw(host));
   }
 
-  function header(title, hint, addLabel, canAdd) {
+  function header(title, hint, addLabel, canAdd, extra) {
     return `
       <div class="toolbar">
         <div><h2 style="font-size:16px">${esc(title)}</h2><div class="mini-note">${esc(hint)}</div></div>
         <div class="spacer"></div>
+        ${extra || ''}
         ${canAdd ? `<button class="btn primary" id="add-btn">+ ${esc(addLabel)}</button>` : ''}
       </div>`;
   }
@@ -64,7 +65,8 @@
     const rows = await API.get('/api/suppliers?active_only=0');
     body.innerHTML = header(
       'Suppliers', 'Their bank details and agreed credit period feed the payment screens.',
-      'New supplier', C.can('master.edit')
+      'New supplier', C.can('master.edit'),
+      C.can('master.edit') ? '<button class="btn" id="upload-btn">&#8679; Upload a list</button>' : ''
     ) + `<div class="card"><div class="body tight" id="tbl"></div></div>`;
 
     body.querySelector('#tbl').innerHTML = C.table(rows, [
@@ -82,12 +84,138 @@
     ], { empty: 'No suppliers yet', emptyIcon: '&#127970;', rowClass: (r) => r.active ? '' : 'row-muted' });
 
     wireAdd(body, () => supplierForm(null, refresh));
+    const up = body.querySelector('#upload-btn');
+    if (up) up.onclick = () => uploadForm(refresh);
     body.querySelectorAll('#tbl [data-act]').forEach((b) => {
       const row = rows.find((r) => r.id === Number(b.dataset.id));
       b.onclick = () => b.dataset.act === 'merge'
         ? mergeForm(row, rows, refresh)
         : supplierForm(row, refresh);
     });
+  }
+
+  /**
+   * Add a batch of suppliers from a spreadsheet.
+   *
+   * The file is read and the result shown before anything is written, because a
+   * column matched wrongly across four hundred rows is far harder to undo than
+   * to check. Nothing is saved until the second button.
+   */
+  function uploadForm(after) {
+    const modal = Modal.open({
+      title: 'Upload a list of suppliers',
+      subtitle: 'Excel or CSV. Nothing is saved until you have seen what it will do',
+      size: 'wide',
+      body: `
+        <div class="alert">
+          The first row should have the headings. <b>Supplier name</b> is the only one needed;
+          <b>Code</b>, <b>Contact person</b>, <b>Phone</b>, <b>Email</b>, <b>TRN</b>,
+          <b>Credit period</b>, <b>Bank name</b>, <b>Account number</b>, <b>IBAN</b>,
+          <b>Address</b> and <b>Notes</b> are used when they are there and ignored when they are not.
+          <br>A supplier already on file is updated rather than added twice.
+          <br><a href="#" id="tpl-link">Download a blank template</a>
+        </div>
+        <div class="field required">
+          <label for="up-file">Spreadsheet</label>
+          <input type="file" id="up-file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+        </div>
+        <div class="alert error" id="up-error" hidden></div>
+        <div id="up-preview"></div>`,
+      footer: `<button class="btn" data-act="cancel">Cancel</button>
+               <button class="btn" data-act="check">Check the file</button>
+               <button class="btn primary" data-act="save" disabled>Import</button>`
+    });
+
+    const fileInput = modal.querySelector('#up-file');
+    const errBox = modal.querySelector('#up-error');
+    const preview = modal.querySelector('#up-preview');
+    const saveBtn = modal.querySelector('[data-act="save"]');
+    const checkBtn = modal.querySelector('[data-act="check"]');
+
+    modal.querySelector('#tpl-link').onclick = (e) => {
+      e.preventDefault();
+      window.location.href = '/api/suppliers/import-template';
+    };
+    modal.querySelector('[data-act="cancel"]').onclick = () => Modal.close();
+    // A different file has not been checked yet, whatever the last one said.
+    fileInput.onchange = () => { saveBtn.disabled = true; preview.innerHTML = ''; errBox.hidden = true; };
+
+    const send = async (apply) => {
+      const file = fileInput.files[0];
+      errBox.hidden = true;
+      if (!file) { errBox.textContent = 'Choose a file first.'; errBox.hidden = false; return; }
+
+      const btn = apply ? saveBtn : checkBtn;
+      const wasText = btn.textContent;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spin"></span> ${apply ? 'Importing' : 'Reading'}`;
+      try {
+        const res = await fetch(`/api/suppliers/import${apply ? '?apply=1' : ''}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: file
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Could not read that file (${res.status})`);
+
+        if (apply) {
+          Modal.close();
+          await window.App.reloadLookups();
+          toast(`${fmt.int(data.counts.add)} supplier(s) added, ${fmt.int(data.counts.update)} updated`, 'ok');
+          after();
+          return;
+        }
+        preview.innerHTML = previewHtml(data);
+        saveBtn.disabled = data.counts.add + data.counts.update === 0;
+      } catch (ex) {
+        errBox.textContent = ex.message;
+        errBox.hidden = false;
+        preview.innerHTML = '';
+        saveBtn.disabled = true;
+      } finally {
+        btn.disabled = apply ? saveBtn.disabled : false;
+        btn.textContent = wasText;
+      }
+    };
+
+    checkBtn.onclick = () => send(false);
+    saveBtn.onclick = () => send(true);
+  }
+
+  /** What the upload found, before any of it is written. */
+  function previewHtml(data) {
+    const c = data.counts;
+    const badges = [
+      `<span class="badge green">${fmt.int(c.add)} to add</span>`,
+      `<span class="badge blue">${fmt.int(c.update)} to update</span>`,
+      c.skip ? `<span class="badge grey">${fmt.int(c.skip)} skipped</span>` : ''
+    ].join(' ');
+
+    return `
+      <div style="margin-top:14px">
+        <div class="btn-row" style="margin-bottom:10px">${badges}</div>
+        <div class="mini-note" style="margin-bottom:10px">
+          Headings row ${fmt.int(data.header_row)}. Columns used:
+          <b>${esc(data.matched.join(', ').replace(/_/g, ' ')) || 'none'}</b>.
+          ${data.ignored.length
+            ? `Ignored: ${esc(data.ignored.join(', '))}.`
+            : ''}
+        </div>
+        ${C.table(data.rows.slice(0, 200), [
+          { label: 'Row', num: true, render: (r) => fmt.int(r.row) },
+          { label: 'Supplier', render: (r) => `<b>${esc(r.name)}</b>` },
+          { label: 'Code', mono: true, render: (r) => esc(r.code || 'new one') },
+          { label: 'Terms', num: true, hidePhone: true, render: (r) => `${fmt.int(r.terms)} days` },
+          { label: 'What happens', render: (r) => r.action === 'add'
+              ? '<span class="badge green">Add</span>'
+              : r.action === 'update'
+                ? '<span class="badge blue">Update</span>'
+                : `<span class="badge grey">Skip</span> <span class="mini-note">${esc(r.reason || '')}</span>` }
+        ], { empty: 'No supplier rows found' })}
+        ${data.rows.length > 200
+          ? `<div class="mini-note" style="padding:8px 2px 0">Showing the first 200 of ${fmt.int(data.rows.length)} rows. All of them will be imported.</div>`
+          : ''}
+      </div>`;
   }
 
   /** Fold duplicate or internal supplier accounts into one. */

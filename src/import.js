@@ -34,8 +34,7 @@ try {
   ExcelJS = require('exceljs');
 } catch {
   console.error(
-    '\n  The spreadsheet reader is not installed. It is a development dependency,\n' +
-    '  so run this from a checkout with:  npm install --include=dev\n'
+    '\n  The spreadsheet reader is not installed. Run npm install first.\n'
   );
   process.exit(1);
 }

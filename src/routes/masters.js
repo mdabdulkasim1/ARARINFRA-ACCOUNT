@@ -6,6 +6,7 @@ const { requireAuth, requirePermission, hashPassword, ROLES, assertCompanyAccess
 const { publicUser } = require('./auth');
 const { text, bool, badRequest, notFound, isBlank } = require('../util');
 const { unallocatedAdvances } = require('../queries');
+const { readSuppliers, templateCsv } = require('../supplier-sheet');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -173,6 +174,133 @@ router.get('/suppliers', (req, res) => {
     .all(q, q, q, bool(req.query.active_only, true) ? 1 : 0);
   res.json(rows);
 });
+
+/** A blank sheet in the shape the upload expects. */
+router.get('/suppliers/import-template', requirePermission('master.edit'), (req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="supplier-upload-template.csv"');
+  res.send(templateCsv());
+});
+
+/**
+ * Add a batch of suppliers from a spreadsheet.
+ *
+ * Suppliers arrive a site at a time, and typing forty of them one form at a time
+ * is nobody's afternoon. A row that names a supplier already on file updates it
+ * rather than making a second one, and only the columns the sheet actually
+ * carries are touched - an upload with no phone column does not wipe the phone
+ * numbers already recorded.
+ *
+ * Nothing is written unless `apply` is asked for, so the same call answers both
+ * "what would this do" and "do it".
+ */
+router.post(
+  '/suppliers/import',
+  requirePermission('master.edit'),
+  express.raw({ type: () => true, limit: '12mb' }),
+  async (req, res, next) => {
+    try {
+      const body = req.body;
+      if (!body || !body.length) throw badRequest('No file was uploaded');
+
+      const { suppliers, matched, ignored, header_row: headerRow } = await readSuppliers(body);
+      if (!suppliers.length) {
+        throw badRequest('That file has a heading row but no suppliers under it.');
+      }
+
+      const apply = bool(req.query.apply);
+      const defaultTerms = Number(process.env.DEFAULT_PAYMENT_TERMS_DAYS || 90);
+
+      const byCode = db.prepare('SELECT * FROM suppliers WHERE upper(code) = ?');
+      const byName = db.prepare('SELECT * FROM suppliers WHERE lower(trim(name)) = ?');
+
+      // Two rows in the same file for one supplier would otherwise both look new.
+      const seen = new Map();
+      const plan = suppliers.map((row) => {
+        const existing = (row.code && byCode.get(row.code)) ||
+                         byName.get(row.name.toLowerCase()) || null;
+        const dupKey = (row.code || row.name).toLowerCase();
+        const item = {
+          row: row.row,
+          name: row.name,
+          code: row.code || (existing ? existing.code : null),
+          action: seen.has(dupKey) ? 'skip' : (existing ? 'update' : 'add'),
+          reason: seen.has(dupKey) ? `Same supplier as row ${seen.get(dupKey)}` : null,
+          existing_id: existing ? existing.id : null,
+          terms: row.payment_terms_days === null
+            ? (existing ? existing.payment_terms_days : defaultTerms)
+            : row.payment_terms_days,
+          data: row
+        };
+        if (!seen.has(dupKey)) seen.set(dupKey, row.row);
+        return item;
+      });
+
+      const counts = plan.reduce((c, p) => { c[p.action] += 1; return c; },
+        { add: 0, update: 0, skip: 0 });
+
+      if (!apply) {
+        return res.json({
+          applied: false, counts, matched, ignored, header_row: headerRow,
+          rows: plan.map(({ data, ...rest }) => rest)
+        });
+      }
+
+      const insert = db.prepare(
+        `INSERT INTO suppliers (code, name, contact_person, phone, email, trn, address,
+                                payment_terms_days, bank_name, bank_account_no, iban, notes, active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+
+      db.transaction(() => {
+        plan.forEach((p) => {
+          const d = p.data;
+          if (p.action === 'skip') return;
+          if (p.action === 'add') {
+            const code = d.code || nextCode('suppliers', 'SUP');
+            const info = insert.run(
+              code, d.name, d.contact_person, d.phone, d.email, d.trn, d.address,
+              p.terms, d.bank_name, d.bank_account_no, d.iban, d.notes, d.active ? 1 : 0
+            );
+            p.existing_id = info.lastInsertRowid;
+            p.code = code;
+            return;
+          }
+          // Only what the sheet actually carries, so an upload missing a column
+          // leaves what is already recorded alone.
+          const keep = (fresh, current) => (fresh === null || fresh === '' ? current : fresh);
+          const was = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(p.existing_id);
+          db.prepare(
+            `UPDATE suppliers SET name = ?, contact_person = ?, phone = ?, email = ?, trn = ?,
+                    address = ?, payment_terms_days = ?, bank_name = ?, bank_account_no = ?,
+                    iban = ?, notes = ?, active = ? WHERE id = ?`
+          ).run(
+            d.name,
+            keep(d.contact_person, was.contact_person), keep(d.phone, was.phone),
+            keep(d.email, was.email), keep(d.trn, was.trn), keep(d.address, was.address),
+            p.terms, keep(d.bank_name, was.bank_name),
+            keep(d.bank_account_no, was.bank_account_no), keep(d.iban, was.iban),
+            keep(d.notes, was.notes), d.active ? 1 : 0, was.id
+          );
+        });
+      })();
+
+      audit(req, {
+        action: 'IMPORT', entity: 'supplier', entity_id: null,
+        summary: `${req.user.name} uploaded suppliers: ${counts.add} added, ${counts.update} updated` +
+                 (counts.skip ? `, ${counts.skip} skipped` : ''),
+        details: { counts, matched, ignored }
+      });
+
+      res.json({
+        applied: true, counts, matched, ignored, header_row: headerRow,
+        rows: plan.map(({ data, ...rest }) => rest)
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 router.get('/suppliers/:id', (req, res, next) => {
   try {

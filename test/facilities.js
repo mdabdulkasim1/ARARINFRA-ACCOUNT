@@ -48,7 +48,7 @@ async function check(name, fn) {
 
 function client() {
   let cookie = '';
-  return async function call(method, url, body) {
+  const call = async function call(method, url, body) {
     const res = await fetch(base + url, {
       method,
       headers: {
@@ -64,6 +64,9 @@ function client() {
     try { data = t ? JSON.parse(t) : null; } catch { data = t; }
     return { status: res.status, data };
   };
+  // Uploads go out as a raw body rather than JSON, so they need the session too.
+  call.cookie = () => cookie;
+  return call;
 }
 
 function seed() {
@@ -422,6 +425,121 @@ async function main() {
     // It only leaves this month's figure if that is the month it fell in.
     const inThisMonth = due.due_date.slice(0, 7) === new Date().toISOString().slice(0, 7);
     assert.strictEqual(after.due_this_month, money(before.due_this_month - (inThisMonth ? due.amount : 0)));
+  });
+
+  // ---------------------------------------------------------------- supplier upload
+
+  const CSV = (rows) => Buffer.from(rows.map((r) => r.join(',')).join('\r\n'), 'utf8');
+
+  async function upload(client, buffer, apply) {
+    const res = await fetch(`${base}/api/suppliers/import${apply ? '?apply=1' : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', Cookie: client.cookie() },
+      body: buffer
+    });
+    const t = await res.text();
+    let data; try { data = t ? JSON.parse(t) : null; } catch { data = t; }
+    return { status: res.status, data };
+  }
+
+  await check('a spreadsheet of suppliers is read before anything is written', async () => {
+    const file = CSV([
+      ['Our new suppliers', '', '', ''],
+      ['', '', '', ''],
+      ['Supplier Name', 'Mobile', 'Credit Period', 'Category'],
+      ['NEW TRADING LLC', '050 111 2222', '60 days', 'Materials'],
+      ['Test Supplier', '050 333 4444', '30', 'Materials'],
+      ['', '', '', ''],
+      ['ANOTHER ONE FZE', '', 'immediate', 'Service']
+    ]);
+    const before = (await owner('GET', '/api/suppliers?active_only=0')).data.length;
+
+    const dry = await upload(owner, file, false);
+    assert.strictEqual(dry.status, 200, JSON.stringify(dry.data));
+    assert.strictEqual(dry.data.applied, false);
+    assert.deepStrictEqual(dry.data.counts, { add: 2, update: 1, skip: 0 });
+    // The heading is on the third line and a blank line sits in the middle, so
+    // the row numbers have to be the ones the spreadsheet shows.
+    assert.strictEqual(dry.data.header_row, 3);
+    assert.deepStrictEqual(dry.data.rows.map((r) => r.row), [4, 5, 7]);
+    assert.deepStrictEqual(dry.data.rows.map((r) => r.action), ['add', 'update', 'add']);
+    // A column we do not understand is reported, never guessed at.
+    assert.deepStrictEqual(dry.data.ignored, ['Category']);
+    assert.deepStrictEqual(dry.data.rows.map((r) => r.terms), [60, 30, 0]);
+
+    assert.strictEqual((await owner('GET', '/api/suppliers?active_only=0')).data.length, before,
+      'a dry run writes nothing');
+  });
+
+  await check('importing adds the new ones and updates the one already on file', async () => {
+    const file = CSV([
+      ['Supplier Name', 'Mobile', 'Credit Period', 'Bank'],
+      ['NEW TRADING LLC', '050 111 2222', '60 days', 'ADCB'],
+      ['Test Supplier', '050 333 4444', '30', '']
+    ]);
+    const res = await upload(owner, file, true);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.data));
+    assert.strictEqual(res.data.applied, true);
+    assert.deepStrictEqual(res.data.counts, { add: 1, update: 1, skip: 0 });
+
+    const all = (await owner('GET', '/api/suppliers?active_only=0')).data;
+    const added = all.find((s) => s.name === 'NEW TRADING LLC');
+    assert.ok(added, 'the new supplier is there');
+    assert.strictEqual(added.payment_terms_days, 60);
+    assert.strictEqual(added.bank_name, 'ADCB');
+    assert.ok(added.code, 'it was given a code');
+
+    // The existing one keeps the bank it already had, because that column was
+    // blank in the upload rather than absent.
+    const existing = all.find((s) => s.id === 1);
+    assert.strictEqual(existing.payment_terms_days, 30);
+    assert.strictEqual(existing.bank_name, 'ADCB');
+  });
+
+  await check('the same supplier twice in one file is added once', async () => {
+    const file = CSV([
+      ['Supplier Name', 'Credit Period'],
+      ['TWICE OVER LLC', '90'],
+      ['TWICE OVER LLC', '90']
+    ]);
+    const res = await upload(owner, file, true);
+    assert.deepStrictEqual(res.data.counts, { add: 1, update: 0, skip: 1 });
+    assert.match(res.data.rows[1].reason, /same supplier as row 2/i);
+
+    const all = (await owner('GET', '/api/suppliers?active_only=0')).data;
+    assert.strictEqual(all.filter((s) => s.name === 'TWICE OVER LLC').length, 1);
+  });
+
+  await check('a file with no supplier name column is refused', async () => {
+    const res = await upload(owner, CSV([['Amount', 'Date'], ['100', '2026-01-01']]), false);
+    assert.strictEqual(res.status, 400);
+    assert.match(res.data.error, /supplier name/i);
+  });
+
+  await check('an empty upload is refused', async () => {
+    const res = await upload(owner, Buffer.alloc(0), false);
+    assert.strictEqual(res.status, 400);
+    assert.match(res.data.error, /no file/i);
+  });
+
+  await check('an accountant can upload, because they may already add suppliers by hand', async () => {
+    const res = await upload(acc, CSV([['Supplier Name'], ['ACCOUNTANT ADDED LLC']]), true);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.data));
+    const all = (await owner('GET', '/api/suppliers?active_only=0')).data;
+    assert.ok(all.some((s) => s.name === 'ACCOUNTANT ADDED LLC'));
+  });
+
+  await check('somebody who cannot touch master data cannot upload either', async () => {
+    // The upload is held to the same permission as the New supplier form, so a
+    // signed-out request gets no further than one.
+    const res = await fetch(`${base}/api/suppliers/import?apply=1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: CSV([['Supplier Name'], ['NOBODY LLC']])
+    });
+    assert.strictEqual(res.status, 401);
+    const all = (await owner('GET', '/api/suppliers?active_only=0')).data;
+    assert.ok(!all.some((s) => s.name === 'NOBODY LLC'));
   });
 
   // ---------------------------------------------------------------- companies

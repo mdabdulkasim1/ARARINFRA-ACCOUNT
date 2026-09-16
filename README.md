@@ -240,12 +240,24 @@ Use the **company selector** in the top bar to look at one company or the whole 
 
 ---
 
+## Adding suppliers from a spreadsheet
+
+**Masters &rarr; Suppliers &rarr; Upload a list** takes an Excel or CSV file. Only
+**Supplier name** is needed; code, contact, phone, email, TRN, credit period, bank,
+account number, IBAN, address and notes are used when the sheet has them. Columns are
+matched on what the heading says, so an existing list usually works as it is, and a
+heading nobody recognises is reported rather than guessed at.
+
+The file is read and the result shown - what would be added, what would be updated,
+what would be skipped - before anything is written. A supplier already on file is
+updated rather than added twice, and a column the sheet leaves blank keeps whatever
+is already recorded.
+
 ## Bringing the old spreadsheet in
 
 The purchase log can be loaded straight into the app:
 
 ```bash
-npm install --include=dev                       # the spreadsheet reader is dev-only
 npm run import -- PURCHASE_LOGS-2026.xlsx --dry-run          # see what it would do
 npm run import -- PURCHASE_LOGS-2026.xlsx --company AIC      # do it
 npm run import -- PURCHASE_LOGS-2026.xlsx --company AIC --cheques   # and the cheques
